@@ -1,0 +1,307 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>استبيان رضا الأهل — Zoud</title>
+<meta name="robots" content="noindex">
+<style>
+  :root {
+    --brand-purple: #6B3FA6;
+    --brand-purple-dark: #52307f;
+    --ink: #1c1530;
+    --ink-faint: #7a7188;
+    --surface: #ffffff;
+    --surface-sunken: #f4f1fa;
+    --border: #e4dff0;
+    --good: #1f9d55;
+    --warn: #b8860b;
+    --crit: #c0392b;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    background: var(--surface-sunken);
+    color: var(--ink);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Helvetica Neue", Arial, "Noto Sans Arabic", sans-serif;
+    line-height: 1.5;
+    padding: 20px 14px 60px;
+    min-height: 100vh;
+  }
+  .shell { max-width: 480px; margin: 0 auto; }
+  .brand-row { display: flex; align-items: center; gap: 10px; margin-bottom: 18px; }
+  .brand-dot { width: 34px; height: 34px; border-radius: 10px; background: var(--brand-purple); flex-shrink: 0; }
+  .brand-name { font-weight: 800; font-size: 15px; color: var(--brand-purple-dark); }
+  .brand-sub { font-size: 11px; color: var(--ink-faint); }
+
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    padding: 20px 18px;
+    margin-bottom: 14px;
+    box-shadow: 0 1px 3px rgba(30,10,60,0.05);
+  }
+  h1 { font-size: 19px; margin: 0 0 6px; color: var(--ink); }
+  p.lead { color: var(--ink-faint); font-size: 13.5px; margin: 0 0 4px; }
+  p.hint { color: var(--ink-faint); font-size: 12.5px; margin: 4px 0 14px; }
+
+  .service-block { border-top: 1px solid var(--border); padding-top: 16px; margin-top: 16px; }
+  .service-block:first-of-type { border-top: none; padding-top: 0; margin-top: 0; }
+  .service-title { font-weight: 700; font-size: 15px; margin-bottom: 8px; }
+
+  .rating-row { display: flex; gap: 8px; direction: ltr; justify-content: flex-end; }
+  .rating-btn {
+    flex: 1;
+    max-width: 56px;
+    aspect-ratio: 1;
+    border-radius: 12px;
+    border: 1.5px solid var(--border);
+    background: var(--surface);
+    color: var(--ink);
+    font-size: 17px;
+    font-weight: 700;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all .12s ease;
+  }
+  .rating-btn:active { transform: scale(0.94); }
+  .rating-btn[aria-pressed="true"] {
+    background: var(--brand-purple);
+    border-color: var(--brand-purple);
+    color: #fff;
+  }
+  .rating-legend { display: flex; justify-content: space-between; font-size: 10.5px; color: var(--ink-faint); margin-top: 6px; direction: rtl; }
+
+  label { display: block; font-weight: 700; font-size: 13.5px; margin: 18px 0 6px; }
+  textarea {
+    width: 100%; border: 1.5px solid var(--border); border-radius: 12px; padding: 10px 12px;
+    font-size: 14px; font-family: inherit; resize: vertical; min-height: 80px; background: var(--surface-sunken);
+  }
+  textarea:focus, .rating-btn:focus-visible { outline: 2px solid var(--brand-purple); outline-offset: 1px; }
+
+  .btn {
+    display: block; width: 100%; margin-top: 20px;
+    background: var(--brand-purple); color: #fff; border: none; border-radius: 12px;
+    padding: 13px; font-size: 15px; font-weight: 700; cursor: pointer;
+  }
+  .btn:active { background: var(--brand-purple-dark); }
+  .btn[disabled] { opacity: .55; cursor: default; }
+
+  .field-error {
+    display: none; color: var(--crit); background: #fdecea; border: 1px solid #f5c6c0;
+    border-radius: 10px; padding: 9px 12px; font-size: 12.5px; margin-top: 12px;
+  }
+
+  .status-screen { text-align: center; padding: 34px 18px; }
+  .status-icon { font-size: 40px; margin-bottom: 10px; }
+  .status-title { font-size: 17px; font-weight: 800; margin-bottom: 6px; }
+  .status-text { font-size: 13.5px; color: var(--ink-faint); }
+
+  .loading { text-align: center; padding: 40px 0; color: var(--ink-faint); font-size: 13.5px; }
+</style>
+</head>
+<body>
+<div class="shell">
+  <div class="brand-row">
+    <div class="brand-dot"></div>
+    <div>
+      <div class="brand-name">Zoud Center</div>
+      <div class="brand-sub">استبيان رضا الأهل عن الجلسات الشهرية</div>
+    </div>
+  </div>
+
+  <div id="app">
+    <div class="card"><div class="loading">جاري التحميل…</div></div>
+  </div>
+</div>
+
+<script>
+(function () {
+  "use strict";
+
+  var AIRTABLE_TOKEN = "patouENWDasDy1nc6.f29e8970787da598053e3e6873a0aeb7cbc4444a27333a9b568338b5db0a4055";
+  var AIRTABLE_BASE = "app0CvCLlC4vyr0FJ";
+  var TABLE_SENDS = "tblBA4JzEtYbuFYBu";
+  var TABLE_RESPONSES = "tbl5eTdalQ6Y8Y44G";
+
+  var app = document.getElementById("app");
+
+  function atUrl(tableId, path) {
+    return "https://api.airtable.com/v0/" + AIRTABLE_BASE + "/" + tableId + (path || "");
+  }
+  function atHeaders(withBody) {
+    var h = { "Authorization": "Bearer " + AIRTABLE_TOKEN };
+    if (withBody) h["Content-Type"] = "application/json";
+    return h;
+  }
+
+  function screen(iconChar, title, text) {
+    app.innerHTML =
+      '<div class="card status-screen">' +
+      '<div class="status-icon">' + iconChar + '</div>' +
+      '<div class="status-title">' + title + '</div>' +
+      '<div class="status-text">' + text + '</div>' +
+      '</div>';
+  }
+
+  function escapeHtml(str) {
+    return String(str || "").replace(/[&<>"']/g, function (c) {
+      return ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c];
+    });
+  }
+
+  function genId(prefix) {
+    return prefix + Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+  }
+
+  // ---- read the token from the URL ----
+  var params = new URLSearchParams(window.location.search);
+  var token = (params.get("t") || "").trim();
+
+  if (!token) {
+    screen("⚠️", "الرابط غير صالح", "الرابط ده مش مكتمل. تأكدي إنك فتحتِ الرابط اللي اتبعتلك بالكامل، أو كلّمي مركز Zoud.");
+    return;
+  }
+
+  // ---- look up the Sends record for this token ----
+  var filterFormula = "{token}='" + token.replace(/'/g, "\\'") + "'";
+  fetch(atUrl(TABLE_SENDS) + "?filterByFormula=" + encodeURIComponent(filterFormula) + "&maxRecords=1", {
+    headers: atHeaders(false)
+  }).then(function (res) {
+    if (!res.ok) throw new Error("Airtable " + res.status);
+    return res.json();
+  }).then(function (data) {
+    var record = (data.records || [])[0];
+    if (!record) {
+      screen("⚠️", "الرابط غير صالح", "معلش، الرابط ده مش موجود عندنا. تأكدي إنك نسخِتيه بالكامل، أو كلّمي مركز Zoud.");
+      return;
+    }
+    var f = record.fields || {};
+    if (f.status === "responded") {
+      screen("💜", "تم استلام ردكم بالفعل", "شكرًا لمشاركتكم رأيكم معانا الشهر ده. لو حابين تضيفوا حاجة، كلّمونا مباشرة.");
+      return;
+    }
+    renderForm(record.id, f);
+  }).catch(function (err) {
+    screen("⚠️", "حصلت مشكلة في الاتصال", "معلش، مقدرناش نفتح الاستبيان دلوقتي. جربي تاني بعد شوية، أو كلّمي مركز Zoud لو المشكلة استمرت.");
+    if (window.console && console.error) console.error(err);
+  });
+
+  function renderForm(sendRid, f) {
+    var services = f.servicesSnapshot || [];
+    var childName = f.childName || "طفلك";
+    var period = f.period || "";
+    var sendId = f.id || "";
+    var childCode = f.childCode || "";
+
+    if (!services.length) {
+      screen("⚠️", "لا توجد خدمات مسجلة", "معلش، مش لاقيين خدمات مسجلة على الرابط ده. كلّمي مركز Zoud عشان نراجعها.");
+      return;
+    }
+
+    var html =
+      '<div class="card">' +
+      '<h1>إزاي كانت جلسات ' + escapeHtml(childName) + ' الشهر ده؟</h1>' +
+      '<p class="lead">رأيكم بيساعدنا نطوّر جودة الجلسات باستمرار. الاستبيان بياخد أقل من دقيقة.</p>';
+
+    services.forEach(function (service, i) {
+      html +=
+        '<div class="service-block">' +
+        '<div class="service-title">مدى رضاك عن جلسات ' + escapeHtml(childName) + ' في ' + escapeHtml(service) + ' الشهر ده؟</div>' +
+        '<div class="rating-row" data-service="' + escapeHtml(service) + '">' +
+        [5, 4, 3, 2, 1].map(function (n) {
+          return '<button type="button" class="rating-btn" data-val="' + n + '" aria-pressed="false">' + n + '</button>';
+        }).join("") +
+        '</div>' +
+        '<div class="rating-legend"><span>راضٍ جدًا (٥)</span><span>غير راضٍ (١)</span></div>' +
+        '</div>';
+    });
+
+    html +=
+      '<label for="fb-comment">في أي تعليق أو ملاحظة حابين تضيفوها؟ (اختياري)</label>' +
+      '<textarea id="fb-comment" placeholder="اكتبي أي حاجة حابة تقوليها..."></textarea>' +
+      '<p class="field-error" id="fb-error"></p>' +
+      '<button class="btn" id="fb-submit">إرسال الرد</button>' +
+      '</div>';
+
+    app.innerHTML = html;
+
+    var ratings = {};
+    document.querySelectorAll(".rating-row").forEach(function (row) {
+      var service = row.getAttribute("data-service");
+      row.querySelectorAll(".rating-btn").forEach(function (btn) {
+        btn.addEventListener("click", function () {
+          ratings[service] = parseInt(btn.getAttribute("data-val"), 10);
+          row.querySelectorAll(".rating-btn").forEach(function (b) {
+            b.setAttribute("aria-pressed", b === btn ? "true" : "false");
+          });
+        });
+      });
+    });
+
+    var submitBtn = document.getElementById("fb-submit");
+    var errEl = document.getElementById("fb-error");
+
+    submitBtn.addEventListener("click", function () {
+      var missing = services.filter(function (s) { return !ratings[s]; });
+      if (missing.length) {
+        errEl.textContent = "من فضلك اختاري تقييم لكل خدمة قبل الإرسال.";
+        errEl.style.display = "block";
+        return;
+      }
+      errEl.style.display = "none";
+      submitBtn.disabled = true;
+      submitBtn.textContent = "جاري الإرسال…";
+
+      var submissionId = genId("sub");
+      var submittedAt = new Date().toISOString();
+      var comment = document.getElementById("fb-comment").value.trim();
+
+      var records = services.map(function (service) {
+        var fields = {
+          id: genId("r"),
+          submissionId: submissionId,
+          sendId: sendId,
+          childCode: childCode,
+          childName: childName,
+          service: service,
+          rating: ratings[service],
+          period: period,
+          submittedAt: submittedAt
+        };
+        if (comment) fields.comment = comment;
+        return { fields: fields };
+      });
+
+      fetch(atUrl(TABLE_RESPONSES), {
+        method: "POST",
+        headers: atHeaders(true),
+        body: JSON.stringify({ records: records })
+      }).then(function (res) {
+        if (!res.ok) throw new Error("Airtable " + res.status);
+        return res.json();
+      }).then(function () {
+        return fetch(atUrl(TABLE_SENDS, "/" + sendRid), {
+          method: "PATCH",
+          headers: atHeaders(true),
+          body: JSON.stringify({ fields: { status: "responded", respondedAt: new Date().toISOString() } })
+        });
+      }).then(function (res) {
+        if (!res.ok) throw new Error("Airtable " + res.status);
+        screen("💜", "تم إرسال ردكم — شكرًا لكم", "رأيكم وصلنا وهيتراجع من فريق Zoud. نتمنى نفضل نطوّر معاكم.");
+      }).catch(function (err) {
+        submitBtn.disabled = false;
+        submitBtn.textContent = "إرسال الرد";
+        errEl.textContent = "معلش، حصلت مشكلة ولم يتم إرسال ردكم. اتأكدي من الإنترنت وحاولي تاني.";
+        errEl.style.display = "block";
+        if (window.console && console.error) console.error(err);
+      });
+    });
+  }
+})();
+</script>
+</body>
+</html>
