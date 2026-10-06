@@ -1,0 +1,960 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Zoud Session Log</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Public+Sans:wght@700;800&amp;family=IBM+Plex+Sans:wght@400;500;600;700&amp;family=IBM+Plex+Sans+Arabic:wght@400;600&amp;display=swap" rel="stylesheet">
+<style>
+  /* Zoud Session Log — standalone page of the Zoud Quick Log (added 2026-10-07).
+     Same Airtable base and visual language as ../index.html. */
+  :root {
+    --ink: #241E33; --ink-soft: #5F5670; --ink-faint: #8A8199;
+    --paper: #F7F5FA; --surface: #FFFFFF; --surface-sunken: #EFF0F5; --border: #E1E1EC;
+    --accent: #6B3FA6; --accent-strong: #52307E; --accent-soft: #EEE3FA; --accent-ink: #3D2463; --on-accent: #FFFFFF;
+    --good: #4E8424; --good-soft: #E7F1DA;
+    --warn: #A85C05; --warn-soft: #FBEAD3;
+    --critical: #A3324F; --critical-soft: #F6DCE3;
+    --info: #1F6F8B; --info-soft: #DCEEF4;
+    --shadow: 0 1px 2px rgba(36,30,51,0.06), 0 6px 20px -8px rgba(36,30,51,0.18);
+    --radius: 16px; --radius-sm: 10px;
+    --font-display: 'Public Sans', 'Segoe UI', Arial, sans-serif;
+    --font-body: 'IBM Plex Sans', 'IBM Plex Sans Arabic', 'Segoe UI', Arial, sans-serif;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --ink: #ECE9F2; --ink-soft: #BDB6CC; --ink-faint: #9A91AD;
+      --paper: #171426; --surface: #201C33; --surface-sunken: #14111F; --border: #322C46;
+      --accent: #C9A0F0; --accent-strong: #DCC3F7; --accent-soft: #2C2140; --accent-ink: #E9DCFA; --on-accent: #1B1330;
+      --good: #9FD66C; --good-soft: #23331A;
+      --warn: #F0B45E; --warn-soft: #3A2A12;
+      --critical: #F08FA8; --critical-soft: #3B1A25;
+      --info: #7CC7E0; --info-soft: #14303A;
+      --shadow: 0 1px 2px rgba(0,0,0,0.3), 0 6px 20px -8px rgba(0,0,0,0.5);
+      color-scheme: dark;
+    }
+  }
+  * { box-sizing: border-box; }
+  [hidden] { display: none !important; }
+  body { margin: 0; background: var(--paper); color: var(--ink); font-family: var(--font-body); font-size: 14px; line-height: 1.55; -webkit-font-smoothing: antialiased; }
+  .shell { max-width: 600px; margin: 0 auto; padding: 20px 16px 64px; display: flex; flex-direction: column; gap: 14px; }
+  .shell.wide { max-width: 860px; }
+  .stack { display: flex; flex-direction: column; gap: 14px; }
+  button, input, select, textarea { font-family: inherit; color: inherit; }
+  button:focus-visible, input:focus-visible, select:focus-visible, a:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  @media (prefers-reduced-motion: reduce) { * { transition-duration: 0.01ms !important; } }
+
+  .back { font-size: 13px; font-weight: 600; color: var(--accent); text-decoration: none; }
+  .eyebrow { font-size: 11px; font-weight: 600; letter-spacing: 0.14em; text-transform: uppercase; color: var(--ink-faint); margin: 0; }
+  h1 { font-family: var(--font-display); font-weight: 800; font-size: 26px; line-height: 1.15; margin: 2px 0 0; }
+  h2 { font-family: var(--font-display); font-weight: 700; font-size: 16px; margin: 0; }
+  .banner { border-radius: var(--radius-sm); padding: 10px 12px; font-size: 13.5px; font-weight: 700; margin: 0; line-height: 1.6; }
+  .banner.bad { background: var(--critical-soft); color: var(--critical); }
+  .banner.od { background: var(--info-soft); color: var(--info); display: flex; flex-wrap: wrap; align-items: center; gap: 8px; justify-content: space-between; }
+  .ar { font-family: 'IBM Plex Sans Arabic', var(--font-body); }
+
+  .viewtabs { display: flex; gap: 6px; background: var(--surface-sunken); padding: 4px; border-radius: 12px; }
+  .viewtab { flex: 1; min-width: 0; border: none; background: none; padding: 9px 8px; border-radius: 9px; font-weight: 700; font-size: 13.5px; color: var(--ink-soft); cursor: pointer; }
+  .viewtab[aria-selected="true"] { background: var(--surface); color: var(--accent-ink); box-shadow: var(--shadow); }
+
+  .card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: var(--shadow); padding: 16px; display: flex; flex-direction: column; gap: 12px; }
+  label, .lbl { font-size: 12.5px; font-weight: 600; color: var(--ink-soft); display: block; margin-bottom: 4px; }
+  select, input[type="text"], input[type="password"] { width: 100%; background: var(--surface-sunken); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 10px 12px; font-size: 14.5px; }
+  .hint { font-size: 12.5px; color: var(--ink-faint); margin: 0; }
+
+  .pill { display: inline-block; font-size: 11px; font-weight: 700; padding: 2px 9px; border-radius: 999px; white-space: nowrap; }
+  .pill.role, .pill.t-session { background: var(--accent-soft); color: var(--accent-ink); }
+  .pill.t-cover { background: var(--info-soft); color: var(--info); }
+  .pill.t-screening { background: var(--warn-soft); color: var(--warn); }
+  .pill.t-initial { background: var(--good-soft); color: var(--good); }
+  .pill.noshow { background: var(--critical-soft); color: var(--critical); }
+  .pill.ok { background: var(--good-soft); color: var(--good); }
+  .pill.wait { background: var(--surface-sunken); color: var(--ink-soft); }
+
+  .summary { display: flex; flex-wrap: wrap; gap: 6px 14px; background: var(--surface-sunken); border-radius: var(--radius-sm); padding: 10px 12px; font-size: 13px; color: var(--ink-soft); }
+  .summary b { color: var(--ink); font-variant-numeric: tabular-nums; }
+  .chip-row { display: flex; flex-wrap: wrap; gap: 6px; }
+
+  .daybar { display: flex; align-items: center; gap: 8px; }
+  .daybar .daylabel { flex: 1; min-width: 0; text-align: center; font-family: var(--font-display); font-weight: 700; font-size: 16px; }
+  .iconbtn { width: 40px; height: 40px; border-radius: 10px; border: 1px solid var(--border); background: var(--surface-sunken); font-size: 18px; font-weight: 700; cursor: pointer; flex-shrink: 0; }
+  .iconbtn:disabled { opacity: 0.4; cursor: default; }
+  .btn { border: none; background: var(--accent); color: var(--on-accent); border-radius: var(--radius-sm); padding: 11px 14px; font-weight: 700; font-size: 14px; cursor: pointer; }
+  .btn.secondary { background: var(--surface-sunken); color: var(--ink); border: 1px solid var(--border); }
+  .btn.small { padding: 7px 12px; font-size: 12.5px; }
+  .btn.danger { background: var(--surface-sunken); color: var(--critical); border: 1px solid var(--border); }
+  .btn.wide { width: 100%; }
+  .btn:disabled { opacity: 0.45; cursor: default; }
+  .rowbtns { display: flex; flex-wrap: wrap; gap: 8px; }
+
+  .notice { border-radius: var(--radius-sm); padding: 10px 12px; font-size: 13px; font-weight: 600; margin: 0; }
+  .notice.lock { background: var(--surface-sunken); color: var(--ink-soft); }
+  .notice.off { background: var(--info-soft); color: var(--info); }
+  .notice.approved { background: var(--good-soft); color: var(--good); }
+  .notice.warn { background: var(--warn-soft); color: var(--warn); }
+
+  .slots { display: flex; flex-direction: column; gap: 6px; }
+  .slot { display: flex; align-items: center; gap: 10px; width: 100%; text-align: start; border: 1px solid var(--border); background: var(--surface); border-radius: var(--radius-sm); padding: 9px 12px; min-height: 46px; cursor: pointer; font-size: 14px; }
+  .slot .time, .review .time { width: 92px; flex-shrink: 0; font-size: 12.5px; font-weight: 600; color: var(--ink-soft); font-variant-numeric: tabular-nums; }
+  .slot .what { flex: 1; min-width: 0; display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; }
+  .slot .child, .review .child { font-weight: 600; overflow-wrap: anywhere; }
+  .slot.empty { border-style: dashed; background: none; }
+  .slot.empty .what { color: var(--ink-faint); font-size: 13px; }
+  .slot:disabled { cursor: default; }
+  .slot.active { border-color: var(--accent); border-style: solid; }
+  .slot.sug { border-style: dashed; background: var(--surface-sunken); cursor: default; flex-wrap: wrap; }
+  .sugbtns { display: flex; gap: 6px; margin-inline-start: auto; }
+  .mini { border: 1px solid var(--border); background: var(--surface); border-radius: 999px; padding: 6px 11px; font-size: 12.5px; font-weight: 700; cursor: pointer; }
+  .mini.ok { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
+
+  .editor { border: 1px solid var(--accent); background: var(--accent-soft); border-radius: var(--radius-sm); padding: 12px; display: flex; flex-direction: column; gap: 10px; }
+  .editor input[type="text"], .editor input[type="password"], .editor select { background: var(--surface); }
+  .chip { border: 1px solid var(--border); background: var(--surface); color: var(--ink-soft); font-size: 13px; font-weight: 600; padding: 8px 13px; border-radius: 999px; cursor: pointer; }
+  .chip[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
+  .err { color: var(--critical); font-size: 12.5px; font-weight: 600; margin: 0; }
+
+  .review { border: 1px solid var(--accent); border-radius: var(--radius-sm); padding: 14px; display: flex; flex-direction: column; gap: 10px; }
+  .review ul { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
+  .review li { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; padding: 7px 0; border-bottom: 1px solid var(--border); }
+  .review li:last-child { border-bottom: none; }
+
+  .mlist { display: flex; flex-direction: column; }
+  .mrow { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 10px; width: 100%; text-align: start; background: none; border: none; border-bottom: 1px solid var(--border); padding: 9px 2px; cursor: pointer; font-size: 13px; }
+  .mrow:last-child { border-bottom: none; }
+  .mrow .md { width: 78px; flex-shrink: 0; font-weight: 700; font-variant-numeric: tabular-nums; }
+  .mrow .mc { flex: 1; min-width: 120px; color: var(--ink-soft); }
+  .mrow[aria-current="true"] .md { color: var(--accent); }
+
+  .totals { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+  .tot { background: var(--surface-sunken); border-radius: var(--radius-sm); padding: 10px 12px; }
+  .tot .n { font-family: var(--font-display); font-weight: 800; font-size: 24px; line-height: 1.1; font-variant-numeric: tabular-nums; }
+  .tot .k { font-size: 12px; color: var(--ink-soft); font-weight: 600; }
+  .tablewrap { overflow-x: auto; border: 1px solid var(--border); border-radius: var(--radius-sm); }
+  table { border-collapse: collapse; width: 100%; font-size: 13px; }
+  th, td { padding: 9px 10px; text-align: end; border-bottom: 1px solid var(--border); white-space: nowrap; font-variant-numeric: tabular-nums; vertical-align: top; }
+  th { font-size: 11px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--ink-faint); background: var(--surface-sunken); font-weight: 700; }
+  th[colspan] { text-align: center; }
+  th:first-child, td:first-child { text-align: start; white-space: normal; min-width: 140px; }
+  td.total, span.total { font-weight: 700; }
+  tr:last-child td { border-bottom: none; }
+  .sname { font-weight: 600; }
+  .ssub { font-size: 11.5px; color: var(--ink-faint); font-weight: 400; }
+  td input.ac { width: 62px; text-align: end; background: var(--surface-sunken); border: 1px solid var(--border); border-radius: 8px; padding: 6px 7px; font-size: 13px; font-variant-numeric: tabular-nums; }
+  td input.note { width: 190px; background: var(--surface-sunken); border: 1px solid var(--border); border-radius: 8px; padding: 6px 8px; font-size: 12.5px; }
+  .finrow { display: flex; align-items: center; justify-content: flex-end; gap: 8px; margin-top: 6px; }
+  .finrow label { margin: 0; }
+  .flags { margin: 0; padding-inline-start: 18px; display: flex; flex-direction: column; gap: 4px; font-size: 13px; color: var(--ink-soft); }
+
+  .toast { position: fixed; left: 50%; bottom: 20px; transform: translateX(-50%); background: var(--ink); color: var(--paper); padding: 9px 16px; border-radius: 999px; font-weight: 700; font-size: 13px; opacity: 0; pointer-events: none; transition: opacity 0.2s; z-index: 10; }
+  .toast.show { opacity: 1; }
+</style>
+</head>
+<body>
+<div class="shell" id="shell">
+  <a class="back" href="../">← Zoud Quick Log</a>
+  <header>
+    <p class="eyebrow">Zoud Center</p>
+    <h1>Session Log</h1>
+  </header>
+
+  <p class="banner bad ar" id="conn-banner" dir="rtl" hidden>⚠️ في مشكلة في الاتصال بقاعدة البيانات. اتأكدي من الإنترنت وافتحي الصفحة تاني.</p>
+  <div class="banner bad" id="save-banner" hidden><span class="ar" dir="rtl">⚠️ آخر تعديل لم يتم حفظه. اتأكدي من الإنترنت ودوسي Retry.</span> <button class="btn small" id="save-retry">Retry</button></div>
+
+  <div class="viewtabs" role="tablist">
+    <button class="viewtab" role="tab" id="tab-therapist" aria-selected="true">My sessions</button>
+    <button class="viewtab" role="tab" id="tab-entry" aria-selected="false">Admin count</button>
+    <button class="viewtab" role="tab" id="tab-admin" aria-selected="false">Operations Director</button>
+  </div>
+
+  <!-- THERAPIST -->
+  <section id="view-therapist" class="stack">
+    <div class="banner od" id="od-edit-banner" hidden><span id="od-edit-text"></span><button class="btn small secondary" id="od-edit-stop">Back to matching</button></div>
+    <div class="card">
+      <div>
+        <label for="sl-staff">Your name</label>
+        <select id="sl-staff"><option value="">Loading…</option></select>
+      </div>
+      <div id="sl-roles" class="chip-row"></div>
+      <div class="summary" id="sl-summary" hidden></div>
+    </div>
+
+    <div class="card" id="sl-daycard" hidden>
+      <div class="daybar">
+        <button class="iconbtn" id="sl-prev" aria-label="Previous day">‹</button>
+        <div class="daylabel" id="sl-daylabel"></div>
+        <button class="iconbtn" id="sl-next" aria-label="Next day">›</button>
+      </div>
+      <div class="rowbtns"><button class="btn secondary small" id="sl-today">Today</button></div>
+      <p class="notice" id="sl-notice" hidden></p>
+      <div class="slots" id="sl-slots"></div>
+      <p class="hint" id="sl-dayhint"></p>
+      <div id="sl-after" class="stack"></div>
+    </div>
+
+    <div class="card" id="sl-monthcard" hidden>
+      <h2 id="sl-month-title"></h2>
+      <p class="hint" id="sl-month-total"></p>
+      <div class="mlist" id="sl-month"></div>
+    </div>
+  </section>
+
+  <!-- ADMIN COUNT -->
+  <section id="view-entry" class="stack" hidden>
+    <div class="card" id="ae-gate">
+      <h2>Admin only</h2>
+      <p class="hint">Enter the Admin code to add the monthly count.</p>
+      <div><label for="ae-code">Code</label><input type="password" id="ae-code" autocomplete="off"></div>
+      <p class="err" id="ae-err" hidden>That code is not right.</p>
+      <button class="btn" id="ae-unlock">Unlock</button>
+    </div>
+    <div class="card" id="ae-body" hidden>
+      <div><label for="ae-month">Month</label><select id="ae-month"></select></div>
+      <p class="hint">Enter your own monthly count for each specialist. Sessions = regular plus cover sessions, including no-shows. What the specialists logged is not shown here, so the two counts stay independent.</p>
+      <div class="tablewrap">
+        <table>
+          <thead><tr><th>Specialist</th><th>Sessions</th><th>Screenings</th><th>I.S</th></tr></thead>
+          <tbody id="ae-rows"></tbody>
+        </table>
+      </div>
+      <p class="hint" id="ae-status"></p>
+      <div class="rowbtns">
+        <button class="btn secondary small" id="ae-change">Change code</button>
+        <button class="btn secondary small" id="ae-lock">Lock this tab</button>
+      </div>
+      <div id="cc-entry"></div>
+    </div>
+  </section>
+
+  <!-- OPERATIONS DIRECTOR -->
+  <section id="view-admin" class="stack" hidden>
+    <div class="card" id="od-gate">
+      <h2>Operations Director only</h2>
+      <p class="hint">This tab has its own code, separate from Manager Access and from the Admin code.</p>
+      <div><label for="od-code">Code</label><input type="password" id="od-code" autocomplete="off"></div>
+      <p class="err" id="od-err" hidden>That code is not right.</p>
+      <button class="btn" id="od-unlock">Unlock</button>
+    </div>
+    <div class="stack" id="od-body" hidden>
+      <div class="card">
+        <div><label for="ad-month">Month</label><select id="ad-month"></select></div>
+        <p class="hint">What each specialist logged and submitted, next to Admin's own count. Only the lines marked Differs need your attention: check the schedule and cameras, then type the final number. That final number is what goes to accounts.</p>
+        <div class="totals" id="ad-totals"></div>
+        <div class="tablewrap">
+          <table>
+            <thead>
+              <tr><th rowspan="2">Specialist</th><th colspan="2">Sessions</th><th colspan="2">Screenings</th><th colspan="2">I.S</th><th rowspan="2">Result</th></tr>
+              <tr><th>Logged</th><th>Admin</th><th>Logged</th><th>Admin</th><th>Logged</th><th>Admin</th></tr>
+            </thead>
+            <tbody id="ad-rows"></tbody>
+          </table>
+        </div>
+        <p class="hint">Sessions = regular plus cover sessions, including paid no-shows. Logged counts only days the specialist reviewed and submitted.</p>
+        <div class="rowbtns">
+          <button class="btn small" id="ad-csv">Download monthly report (Excel)</button>
+          <button class="btn secondary small" id="ad-csv-detail">Download every session (Excel)</button>
+          <button class="btn secondary small" id="ad-refresh">Refresh</button>
+          <button class="btn secondary small" id="od-change">Change code</button>
+          <button class="btn secondary small" id="od-lock">Lock this tab</button>
+        </div>
+        <div id="cc-admin"></div>
+      </div>
+      <div class="card">
+        <h2>Where to look</h2>
+        <ul class="flags" id="ad-flags"></ul>
+      </div>
+    </div>
+  </section>
+</div>
+<datalist id="child-list"></datalist>
+<div class="toast" id="toast" role="status"></div>
+
+<script>
+(function () {
+  "use strict";
+  // ================= config =================
+  var AIRTABLE_TOKEN = "patrKDQe1fcugASIL.2fb1b05f11fb20e251d59e18f822d7ae51ffe4fd154aae3d4092a1bd27f06912";
+  var AIRTABLE_BASE = "app0CvCLlC4vyr0FJ";
+  var CHILD_BASE = "appRTDGE7sgX9StUf", CHILD_TABLE = "tbltxDuLmnXzzODAl";
+  var TABLES = {
+    settings: "tbl3zu3LTYnUL3du9", staffDirectory: "tbl4EGUFtysEup8tb", sessionCoverage: "tblbP56lQeaZ5SPXu",
+    days: "tblJk7uMHdZrpf0bU",      // SessionLogDays: one record per specialist per day
+    monthly: "tblIEKUTS32bPX3GS"    // SessionLogMonthly: Admin count + Operations Director decision
+  };
+  var SLOT_COUNT = 15, SLOT_MIN = 45, START_MIN = 9 * 60;   // 9:00 → 8:15 pm, as in the paper signing sheet
+  // Who logs sessions, and which types each title may log (per Haidy, 2026-10-07).
+  // Trainee / Technical Coordinator / Technical Director alone do not log.
+  var LOGGING_ROLES = ["HOD", "Deputy", "Consultant", "Therapist", "Senior Therapist"];
+  var SENIOR = ["HOD", "Deputy", "Consultant"];
+  var TYPES = { session: "Session", cover: "Cover session", screening: "Screening", initial: "Initial session" };
+  var DOW = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+  var DOW_LONG = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+  var MON = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+  var MON_LONG = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
+  var OD_NAME = "Operations Director";
+
+  // ================= small helpers =================
+  var $ = function (id) { return document.getElementById(id); };
+  function pad(n) { return (n < 10 ? "0" : "") + n; }
+  function iso(d) { return d.getFullYear() + "-" + pad(d.getMonth() + 1) + "-" + pad(d.getDate()); }
+  function fromIso(s) { var p = s.split("-"); return new Date(+p[0], +p[1] - 1, +p[2]); }
+  function addDays(s, n) { var d = fromIso(s); d.setDate(d.getDate() + n); return iso(d); }
+  function monthEnd(m) { var p = m.split("-"); return iso(new Date(+p[0], +p[1], 0)); }
+  function prevMonth(m) { var p = m.split("-"); return iso(new Date(+p[0], +p[1] - 2, 1)).slice(0, 7); }
+  function monthLabel(m) { var p = m.split("-"); return MON_LONG[+p[1] - 1] + " " + p[0]; }
+  function esc(s) { return String(s == null ? "" : s).replace(/[&<>"]/g, function (c) { return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]; }); }
+  // The centre's calendar day, whatever the device's clock zone is.
+  function cairoToday() {
+    try { return new Intl.DateTimeFormat("en-CA", { timeZone: "Africa/Cairo", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date()); }
+    catch (e) { return iso(new Date()); }
+  }
+  function slotLabel(i) {
+    function f(m) { var h = Math.floor(m / 60), mm = m % 60, h12 = h % 12 || 12; return h12 + ":" + pad(mm); }
+    var s = START_MIN + i * SLOT_MIN;
+    return f(s) + " – " + f(s + SLOT_MIN);
+  }
+  function simpleHash(s) { var h = 0; for (var i = 0; i < s.length; i++) { h = ((h << 5) - h + s.charCodeAt(i)) | 0; } return h.toString(36); }
+  function toast(msg) { var t = $("toast"); t.textContent = msg; t.classList.add("show"); clearTimeout(toast.t); toast.t = setTimeout(function () { t.classList.remove("show"); }, 2000); }
+  function lsGet(k) { try { return localStorage.getItem(k) || ""; } catch (e) { return ""; } }
+  function lsSet(k, v) { try { localStorage.setItem(k, v); } catch (e) {} }
+  function ssGet(k) { try { return sessionStorage.getItem(k) || ""; } catch (e) { return ""; } }
+  function ssSet(k, v) { try { if (v) sessionStorage.setItem(k, v); else sessionStorage.removeItem(k); } catch (e) {} }
+
+  // ================= Airtable =================
+  function atRequest(method, base, tableId, opts) {
+    opts = opts || {};
+    var url = "https://api.airtable.com/v0/" + base + "/" + tableId + (opts.path || "") + (opts.query ? "?" + opts.query : "");
+    var headers = { "Authorization": "Bearer " + AIRTABLE_TOKEN };
+    if (opts.body) headers["Content-Type"] = "application/json";
+    return fetch(url, { method: method, headers: headers, body: opts.body ? JSON.stringify(opts.body) : undefined })
+      .catch(function (e) { throw new Error("Network error: " + (e && e.message)); })
+      .then(function (res) {
+        if (res.status === 429) return new Promise(function (r) { setTimeout(r, 1200); }).then(function () { return atRequest(method, base, tableId, opts); });
+        if (!res.ok) return res.text().catch(function () { return ""; }).then(function (t) { throw new Error("Airtable " + res.status + ": " + (t || "").slice(0, 300)); });
+        return res.json();
+      });
+  }
+  function atList(tableId, formula, base, extraQuery) {
+    var all = [];
+    function page(offset) {
+      var q = "pageSize=100" + (formula ? "&filterByFormula=" + encodeURIComponent(formula) : "") + (extraQuery || "") + (offset ? "&offset=" + encodeURIComponent(offset) : "");
+      return atRequest("GET", base || AIRTABLE_BASE, tableId, { query: q }).then(function (data) {
+        all = all.concat(data.records || []);
+        return data.offset ? page(data.offset) : all;
+      });
+    }
+    return page(null);
+  }
+  function atCreate(tableId, fields) { return atRequest("POST", AIRTABLE_BASE, tableId, { body: { records: [{ fields: fields }] } }).then(function (d) { return d.records[0]; }); }
+  function atUpdate(tableId, rid, fields) { return atRequest("PATCH", AIRTABLE_BASE, tableId, { path: "/" + rid, body: { fields: fields } }); }
+  function fq(s) { return '"' + String(s).replace(/\\/g, "\\\\").replace(/"/g, '\\"') + '"'; }   // formula string literal
+
+  // ================= state =================
+  var TODAY = cairoToday();
+  var STAFF = [];              // eligible, active: { name, roles[], dept }
+  var settings = {};           // key -> { rid, value }
+  var dayRecs = {};            // "name|date" -> { rid, staffName, date, entries{}, submittedAt, updatedAt, lastEditedBy }
+  var loadedMonths = {};       // "name|YYYY-MM" or "*|YYYY-MM" -> true once fetched
+  var monthRecs = {};          // "name|YYYY-MM" -> { rid, admin{s,sc,is}, fin{s,sc,is}, note }
+  var loadedMonthly = {};      // "YYYY-MM" -> true
+  var coverage = null;         // SessionCoverage rows (loaded only for the OD tab)
+  var failedSaves = {};        // retry functions keyed by record key
+  var cur = { staff: "", date: TODAY, editing: null, draft: null, review: false, error: "", loading: false };
+  var odEdit = false;          // true while the Operations Director is correcting a specialist's days
+  var adMonth = TODAY.slice(0, 7);
+  var unlocked = { entry: false, admin: false };
+
+  function settingVal(k, fallback) { return settings[k] && settings[k].value ? settings[k].value : fallback; }
+  function launchMonth() { return settingVal("sessionLogLaunchMonth", ""); }
+  function editWindow() { var n = parseInt(settingVal("sessionLogEditWindowDays", "3"), 10); return n >= 0 ? n : 3; }
+  function staffObj(name) { name = name || cur.staff; return STAFF.filter(function (s) { return s.name === name; })[0] || null; }
+  function isSenior(st) { return !!st && st.roles.some(function (r) { return SENIOR.indexOf(r) >= 0; }); }
+  function typesFor(st) { return isSenior(st) ? ["session", "cover", "screening", "initial"] : ["session", "cover"]; }
+  function dayKey() { return cur.staff + "|" + cur.date; }
+  function dayEntries(key) { var r = dayRecs[key || dayKey()]; return r ? r.entries : {}; }
+  function hasEntries(key) { return Object.keys(dayEntries(key)).length > 0; }
+  function isSubmitted(key) { var r = dayRecs[key]; return !!(r && r.submittedAt); }
+
+  // ================= loading =================
+  function mergeDayRecord(r) {
+    var f = r.fields || {}, key = f.key || ((f.staffName || "") + "|" + (f.date || ""));
+    var ex = dayRecs[key];
+    // Two devices can create two records for the same day; keep the most recently updated one.
+    if (ex && ex.rid && ex.rid !== r.id && (ex.updatedAt || "") >= (f.updatedAt || "")) return;
+    if (ex && ex._saving) return;   // never overwrite a day with a save in flight
+    var entries = {};
+    try { entries = f.entriesJson ? JSON.parse(f.entriesJson) : {}; } catch (e) { entries = {}; }
+    dayRecs[key] = { rid: r.id, staffName: f.staffName || "", date: f.date || "", entries: entries || {}, submittedAt: f.submittedAt || "", updatedAt: f.updatedAt || "", lastEditedBy: f.lastEditedBy || "" };
+  }
+  function ensureMonths(staff, months) {
+    var need = months.filter(function (m, i) { return months.indexOf(m) === i && !loadedMonths[staff + "|" + m] && !loadedMonths["*|" + m]; });
+    if (!need.length) return Promise.resolve();
+    var formula = "AND({staffName}=" + fq(staff) + ",OR(" + need.map(function (m) { return "{month}=" + fq(m); }).join(",") + "))";
+    return atList(TABLES.days, formula).then(function (recs) {
+      recs.forEach(mergeDayRecord);
+      need.forEach(function (m) { loadedMonths[staff + "|" + m] = true; });
+    });
+  }
+  function ensureAllDays(month, force) {
+    if (loadedMonths["*|" + month] && !force) return Promise.resolve();
+    return atList(TABLES.days, "{month}=" + fq(month)).then(function (recs) { recs.forEach(mergeDayRecord); loadedMonths["*|" + month] = true; });
+  }
+  function ensureMonthly(month, force) {
+    if (loadedMonthly[month] && !force) return Promise.resolve();
+    return atList(TABLES.monthly, "{month}=" + fq(month)).then(function (recs) {
+      recs.forEach(function (r) {
+        var f = r.fields || {}, key = f.key || (f.staffName + "|" + f.month), ex = monthRecs[key];
+        if (ex && ex._saving) return;
+        function n(v) { return typeof v === "number" ? v : undefined; }
+        monthRecs[key] = { rid: r.id, admin: { s: n(f.adminSessions), sc: n(f.adminScreenings), is: n(f.adminInitials) }, fin: { s: n(f.finalSessions), sc: n(f.finalScreenings), is: n(f.finalInitials) }, note: f.finalNote || "" };
+      });
+      loadedMonthly[month] = true;
+    });
+  }
+  function ensureCoverage(force) {
+    if (coverage && !force) return Promise.resolve();
+    return atList(TABLES.sessionCoverage).then(function (recs) { coverage = recs.map(function (r) { return r.fields || {}; }); }).catch(function () { coverage = []; });
+  }
+  function boot() {
+    var staffP = atList(TABLES.staffDirectory).then(function (recs) {
+      STAFF = recs.map(function (r) { var f = r.fields || {}; return { name: f.name || "", roles: f.roles || [], dept: f.department || "", active: f.active === true }; })
+        .filter(function (p) { return p.active && p.name && p.roles.some(function (r) { return LOGGING_ROLES.indexOf(r) >= 0; }); })
+        .sort(function (a, b) { return a.name.localeCompare(b.name); });
+    });
+    var setP = atList(TABLES.settings).then(function (recs) { recs.forEach(function (r) { var f = r.fields || {}; if (f.key) settings[f.key] = { rid: r.id, value: f.value || "" }; }); });
+    // Non-critical: without it the child field is plain free text.
+    atList(CHILD_TABLE, "", CHILD_BASE, "&fields%5B%5D=Name").then(function (recs) {
+      var seen = {}, names = [];
+      recs.forEach(function (r) { var n = (r.fields && r.fields.Name) || ""; if (n && !seen[n]) { seen[n] = 1; names.push(n); } });
+      $("child-list").innerHTML = names.map(function (n) { return '<option value="' + esc(n) + '">'; }).join("");
+    }).catch(function () {});
+    return Promise.all([staffP, setP]);
+  }
+
+  // ================= saving =================
+  function countEntries(entries) {
+    var c = { session: 0, cover: 0, screening: 0, initial: 0, noshow: 0 };
+    Object.keys(entries).forEach(function (i) { var e = entries[i]; if (c[e.type] === undefined) return; c[e.type]++; if (e.status === "noshow") c.noshow++; });
+    return c;
+  }
+  function showSaveBanner() { $("save-banner").hidden = Object.keys(failedSaves).length === 0; }
+  function saveDay(key) {
+    var rec = dayRecs[key]; if (!rec) return Promise.resolve();
+    rec._saving = (rec._saving || 0) + 1;
+    rec._chain = (rec._chain || Promise.resolve()).then(function () {
+      var st = staffObj(rec.staffName), c = countEntries(rec.entries), now = new Date().toISOString();
+      rec.updatedAt = now;
+      var fields = {
+        key: key, staffName: rec.staffName, dept: st ? st.dept : "", roles: st ? st.roles.join(", ") : "",
+        date: rec.date, month: rec.date.slice(0, 7), entriesJson: JSON.stringify(rec.entries),
+        sessions: c.session, covers: c.cover, screenings: c.screening, initials: c.initial, noShows: c.noshow,
+        submittedAt: rec.submittedAt || "", updatedAt: now, lastEditedBy: rec.lastEditedBy || rec.staffName
+      };
+      if (rec.rid) return atUpdate(TABLES.days, rec.rid, fields);
+      fields.loggedAt = now;
+      return atCreate(TABLES.days, fields).then(function (r) { rec.rid = r.id; });
+    }).then(function () { delete failedSaves[key]; }, function (err) {
+      if (window.console) console.error("Session Log save failed", err);
+      failedSaves[key] = function () { return saveDay(key); };
+    }).then(function () { rec._saving--; showSaveBanner(); });
+    return rec._chain;
+  }
+  function touchDay(submit) {
+    var key = dayKey(), rec = dayRecs[key];
+    if (!rec) rec = dayRecs[key] = { rid: null, staffName: cur.staff, date: cur.date, entries: {}, submittedAt: "", updatedAt: "", lastEditedBy: "" };
+    rec.lastEditedBy = odEdit ? OD_NAME : cur.staff;
+    // The specialist's own edit sends the day back to "not submitted"; the Operations Director's correction counts straight away.
+    if (odEdit) rec.submittedAt = rec.submittedAt || new Date().toISOString();
+    else rec.submittedAt = submit ? new Date().toISOString() : "";
+    return saveDay(key);
+  }
+  function saveMonthly(key) {
+    var rec = monthRecs[key]; if (!rec) return Promise.resolve();
+    rec._saving = (rec._saving || 0) + 1;
+    rec._chain = (rec._chain || Promise.resolve()).then(function () {
+      var p = key.split("|"), now = new Date().toISOString();
+      function v(n) { return typeof n === "number" ? n : null; }
+      // Send only the side that was edited, so Admin and the Operations Director never overwrite each other's numbers with a stale copy.
+      var fields = { key: key, staffName: p[0], month: p[1] };
+      if (rec._touched === "admin") { fields.adminSessions = v(rec.admin.s); fields.adminScreenings = v(rec.admin.sc); fields.adminInitials = v(rec.admin.is); fields.adminUpdatedAt = now; }
+      else { fields.finalSessions = v(rec.fin.s); fields.finalScreenings = v(rec.fin.sc); fields.finalInitials = v(rec.fin.is); fields.finalNote = rec.note || ""; fields.finalDecidedAt = now; }
+      if (rec.rid) return atUpdate(TABLES.monthly, rec.rid, fields);
+      return atCreate(TABLES.monthly, fields).then(function (r) { rec.rid = r.id; });
+    }).then(function () { delete failedSaves["m:" + key]; toast("Saved"); }, function (err) {
+      if (window.console) console.error("Session Log monthly save failed", err);
+      failedSaves["m:" + key] = function () { return saveMonthly(key); };
+    }).then(function () { rec._saving--; showSaveBanner(); });
+    return rec._chain;
+  }
+  $("save-retry").addEventListener("click", function () {
+    var fns = Object.keys(failedSaves).map(function (k) { return failedSaves[k]; });
+    Promise.all(fns.map(function (f) { return f(); })).then(function () { if (!Object.keys(failedSaves).length) toast("Saved"); });
+  });
+
+  // ================= counting =================
+  // Only submitted days count. pending = days with entries that were never submitted.
+  function countMonth(name, month) {
+    var c = { session: 0, cover: 0, screening: 0, initial: 0, noshow: 0, pending: [] };
+    Object.keys(dayRecs).forEach(function (k) {
+      var r = dayRecs[k]; if (r.staffName !== name || r.date.slice(0, 7) !== month) return;
+      if (!Object.keys(r.entries).length) return;
+      if (!r.submittedAt) { c.pending.push(r.date); return; }
+      var d = countEntries(r.entries);
+      ["session", "cover", "screening", "initial", "noshow"].forEach(function (t) { c[t] += d[t]; });
+    });
+    return c;
+  }
+  function countLine(c, senior) {
+    var n = c.session + c.cover; return n + (n === 1 ? " session" : " sessions") + (c.cover ? " (" + c.cover + " cover)" : "") + (senior ? " · " + c.screening + " screening · " + c.initial + " I.S" : "") + (c.noshow ? " · incl. " + c.noshow + " no-show" : "");
+  }
+
+  // ================= therapist view =================
+  function dayState() {
+    if (fromIso(cur.date).getDay() === 5) return "friday";
+    if (cur.date > TODAY) return "future";
+    if (odEdit) return "open";
+    var w = editWindow(), lm = launchMonth();
+    if (cur.date >= addDays(TODAY, -w)) return "open";
+    // First month: every day stays open until a few days after the month ends.
+    if (lm && cur.date.slice(0, 7) === lm && TODAY <= addDays(monthEnd(lm), w)) return "open";
+    return "old";
+  }
+  function dismissedSet() { try { return JSON.parse(lsGet("zoud_sl_dismissed_" + dayKey()) || "{}"); } catch (e) { return {}; } }
+  function suggestion(i) {
+    var src = dayRecs[cur.staff + "|" + addDays(cur.date, -7)];
+    if (!src || !src.entries[i] || dismissedSet()[i]) return null;
+    return src.entries[i];
+  }
+  function recentChildren() {
+    var seen = {}, out = [], from = addDays(cur.date, -28);
+    Object.keys(dayRecs).sort().reverse().forEach(function (k) {
+      var r = dayRecs[k]; if (r.staffName !== cur.staff || r.date < from) return;
+      Object.keys(r.entries).forEach(function (i) { var c = r.entries[i].child; if (c && !seen[c]) { seen[c] = 1; out.push(c); } });
+    });
+    return out.slice(0, 12);
+  }
+  function goTo(date) {
+    cur.date = date; cur.editing = null; cur.review = false; cur.error = "";
+    loadAndRender();
+  }
+  function loadAndRender() {
+    if (!cur.staff) { renderTherapist(); return; }
+    var months = [cur.date.slice(0, 7), addDays(cur.date, -7).slice(0, 7), addDays(cur.date, -28).slice(0, 7)];
+    var already = months.every(function (m) { return loadedMonths[cur.staff + "|" + m] || loadedMonths["*|" + m]; });
+    if (already) { renderTherapist(); return; }
+    cur.loading = true; renderTherapist();
+    var staff = cur.staff;
+    ensureMonths(staff, months).then(function () { $("conn-banner").hidden = true; }, function () { $("conn-banner").hidden = false; })
+      .then(function () { if (cur.staff === staff) { cur.loading = false; renderTherapist(); } });
+  }
+  function fillStaffSelect() {
+    var sel = $("sl-staff");
+    sel.innerHTML = '<option value="">Choose your name</option>' + STAFF.map(function (s) { return '<option value="' + esc(s.name) + '">' + esc(s.name) + "</option>"; }).join("");
+    var saved = lsGet("zoud_sl_staff");
+    if (saved && staffObj(saved)) { sel.value = saved; cur.staff = saved; }
+  }
+  $("sl-staff").addEventListener("change", function () {
+    cur.staff = this.value; if (!odEdit) lsSet("zoud_sl_staff", cur.staff);
+    cur.editing = null; cur.review = false; loadAndRender();
+  });
+  $("sl-prev").addEventListener("click", function () { goTo(addDays(cur.date, -1)); });
+  $("sl-next").addEventListener("click", function () { goTo(addDays(cur.date, 1)); });
+  $("sl-today").addEventListener("click", function () { goTo(TODAY); });
+  $("od-edit-stop").addEventListener("click", function () { stopOdEdit(); show("admin"); });
+
+  function renderTherapist() {
+    var st = staffObj();
+    $("od-edit-banner").hidden = !odEdit;
+    if (odEdit) $("od-edit-text").textContent = "Operations Director: correcting " + cur.staff + "'s days. Every change is recorded under your title and counts straight away.";
+    $("sl-staff").disabled = odEdit;
+    $("sl-daycard").hidden = !st; $("sl-monthcard").hidden = !st; $("sl-summary").hidden = !st;
+    if (!st) { $("sl-roles").innerHTML = STAFF.length ? '<span class="hint">Choose your name to start. The page remembers it on this phone.</span>' : ""; return; }
+    var d = fromIso(cur.date), state = dayState(), entries = dayEntries(), senior = isSenior(st);
+    $("sl-roles").innerHTML = st.roles.map(function (r) { return '<span class="pill role">' + esc(r) + "</span>"; }).join("") +
+      (st.dept ? '<span class="pill wait">' + esc(st.dept) + "</span>" : "") +
+      '<span class="hint" style="align-self:center">Can log: ' + typesFor(st).map(function (t) { return TYPES[t]; }).join(", ") + "</span>";
+    var c = countMonth(cur.staff, cur.date.slice(0, 7));
+    $("sl-summary").innerHTML = "<span>" + MON_LONG[d.getMonth()] + " submitted</span>" +
+      "<span><b>" + (c.session + c.cover) + "</b> sessions</span>" + (c.cover ? "<span>incl. <b>" + c.cover + "</b> cover</span>" : "") +
+      (senior ? "<span><b>" + c.screening + "</b> screening</span><span><b>" + c.initial + "</b> I.S</span>" : "") +
+      (c.noshow ? "<span>incl. <b>" + c.noshow + "</b> no-show</span>" : "") +
+      (c.pending.length ? '<span class="pill noshow">' + c.pending.length + " day" + (c.pending.length > 1 ? "s" : "") + " not submitted yet</span>" : "");
+    $("sl-daylabel").textContent = (cur.date === TODAY ? "Today · " : "") + DOW[d.getDay()] + " " + d.getDate() + " " + MON[d.getMonth()];
+    $("sl-next").disabled = cur.date >= TODAY;
+
+    var notice = $("sl-notice"), msg = "", cls = "lock";
+    if (cur.loading) msg = "Loading…";
+    else if (state === "friday") { msg = "Friday is a day off. No sessions to log."; cls = "off"; }
+    else if (state === "old") msg = "More than " + editWindow() + " days ago, so it is view-only. Ask the Operations Director if something needs correcting.";
+    else if (state === "future") msg = "You can't log a day that hasn't happened yet.";
+    notice.hidden = !msg; notice.textContent = msg; notice.className = "notice " + cls;
+
+    var html = "", sugCount = 0, editable = state === "open" && !cur.loading;
+    if (state !== "friday" && !cur.loading) for (var i = 0; i < SLOT_COUNT; i++) {
+      var e = entries[i];
+      if (cur.editing === i && editable) { html += slotRow(i, e, true, editable) + editorHtml(i, !!e); continue; }
+      var sug = (editable && !e) ? suggestion(i) : null;
+      if (sug) { html += sugRow(i, sug); sugCount++; continue; }
+      html += slotRow(i, e, false, editable);
+    }
+    $("sl-slots").innerHTML = html;
+    var n = Object.keys(entries).length, hint = "";
+    if (!cur.loading && state !== "friday") {
+      hint = n ? n + " logged for this day." : (editable ? "Tap a time to log it." : "Nothing logged for this day.");
+      if (sugCount) hint = sugCount + " waiting from last " + DOW_LONG[d.getDay()] + "'s schedule: tap ✓ if it happened, No-show if the child didn't come, ✕ if it isn't on today. " + hint;
+    }
+    $("sl-dayhint").textContent = hint;
+    renderAfter(state, entries, sugCount, d, editable);
+    renderMonth(d);
+    wireSlots();
+  }
+  function slotRow(i, e, active, editable) {
+    var inner = e
+      ? '<span class="child">' + esc(e.child) + '</span><span class="pill t-' + esc(e.type) + '">' + (TYPES[e.type] || esc(e.type)) + "</span>" +
+        (e.type === "cover" && e.coverFor ? '<span class="hint">for ' + esc(e.coverFor) + "</span>" : "") +
+        (e.status === "noshow" ? '<span class="pill noshow">No-show</span>' : "")
+      : (editable ? "+ Log this time" : "—");
+    return '<button class="slot' + (e ? "" : " empty") + (active ? " active" : "") + '" data-slot="' + i + '"' + (editable ? "" : " disabled") + '><span class="time">' + slotLabel(i) + '</span><span class="what">' + inner + "</span></button>";
+  }
+  function sugRow(i, e) {
+    return '<div class="slot sug"><span class="time">' + slotLabel(i) + '</span><span class="what"><span class="child">' + esc(e.child) + '</span><span class="pill t-' + esc(e.type) + '">' + (TYPES[e.type] || esc(e.type)) + "</span></span>" +
+      '<span class="sugbtns"><button class="mini ok" data-sug="' + i + '" data-act="done">✓ Attended</button><button class="mini" data-sug="' + i + '" data-act="noshow">No-show</button><button class="mini" data-sug="' + i + '" data-act="x" aria-label="Not today">✕</button></span></div>';
+  }
+  function editorHtml(i, existing) {
+    var d = cur.draft, st = staffObj();
+    function chips(group, opts, val) {
+      return '<div class="chip-row">' + opts.map(function (o) { return '<button type="button" class="chip" data-g="' + group + '" data-v="' + o[0] + '" aria-pressed="' + (String(val) === String(o[0])) + '">' + o[1] + "</button>"; }).join("") + "</div>";
+    }
+    var h = '<div class="editor">';
+    h += '<div><label for="ed-child">Child</label><input type="text" id="ed-child" dir="auto" list="child-list" autocomplete="off" placeholder="Type the child\'s name" value="' + esc(d.child) + '"></div>';
+    var rc = recentChildren();
+    if (rc.length) h += '<div><span class="lbl">Your children (tap to pick)</span><div class="chip-row">' + rc.map(function (c) { return '<button type="button" class="chip" data-child="' + esc(c) + '" aria-pressed="' + (c === d.child) + '">' + esc(c) + "</button>"; }).join("") + "</div></div>";
+    h += '<div><span class="lbl">Type</span>' + chips("type", typesFor(st).map(function (t) { return [t, TYPES[t]]; }), d.type) + "</div>";
+    if (d.type === "cover") h += '<div><label for="ed-cover">Covering for</label><select id="ed-cover"><option value="">Choose the absent therapist</option>' +
+      STAFF.filter(function (s) { return s.name !== cur.staff; }).map(function (s) { return '<option value="' + esc(s.name) + '"' + (s.name === d.coverFor ? " selected" : "") + ">" + esc(s.name) + "</option>"; }).join("") + "</select></div>";
+    h += '<div><span class="lbl">Attendance</span>' + chips("status", [["done", "Attended"], ["noshow", "No-show (same-day cancel or absent)"]], d.status) + "</div>";
+    if (cur.error) h += '<p class="err">' + esc(cur.error) + "</p>";
+    h += '<div class="rowbtns"><button class="btn" id="ed-save">Save</button><button class="btn secondary" id="ed-cancel">Cancel</button>' + (existing ? '<button class="btn danger" id="ed-remove">Remove</button>' : "") + "</div></div>";
+    return h;
+  }
+  function wireSlots() {
+    document.querySelectorAll("#sl-slots .slot[data-slot]").forEach(function (b) {
+      b.addEventListener("click", function () {
+        var i = +b.getAttribute("data-slot");
+        if (cur.editing === i) { cur.editing = null; renderTherapist(); return; }
+        var e = dayEntries()[i];
+        cur.editing = i; cur.error = ""; cur.review = false;
+        cur.draft = e ? { child: e.child || "", type: e.type, status: e.status || "done", coverFor: e.coverFor || "" } : { child: "", type: "session", status: "done", coverFor: "" };
+        renderTherapist();
+      });
+    });
+    document.querySelectorAll("[data-sug]").forEach(function (b) {
+      b.addEventListener("click", function () {
+        var i = +b.getAttribute("data-sug"), act = b.getAttribute("data-act"), src = suggestion(i);
+        if (!src) return;
+        if (act === "x") { var ds = dismissedSet(); ds[i] = 1; lsSet("zoud_sl_dismissed_" + dayKey(), JSON.stringify(ds)); renderTherapist(); return; }
+        var e = { type: src.type, child: src.child, status: act }; if (src.type === "cover") e.coverFor = src.coverFor || "";
+        setEntry(i, e);
+      });
+    });
+    var child = $("ed-child"); if (!child) return;
+    child.addEventListener("input", function () { cur.draft.child = child.value; });
+    document.querySelectorAll("[data-child]").forEach(function (b) { b.addEventListener("click", function () { cur.draft.child = b.getAttribute("data-child"); cur.error = ""; renderTherapist(); }); });
+    var cov = $("ed-cover"); if (cov) cov.addEventListener("change", function () { cur.draft.coverFor = cov.value; });
+    document.querySelectorAll(".editor .chip[data-g]").forEach(function (c) {
+      c.addEventListener("click", function () { cur.draft[c.getAttribute("data-g")] = c.getAttribute("data-v"); cur.error = ""; renderTherapist(); });
+    });
+    $("ed-cancel").addEventListener("click", function () { cur.editing = null; renderTherapist(); });
+    var rm = $("ed-remove"); if (rm) rm.addEventListener("click", function () { setEntry(cur.editing, null); });
+    $("ed-save").addEventListener("click", function () {
+      var d = cur.draft;
+      d.child = d.child.trim();
+      if (!d.child) cur.error = "Enter the child's name.";
+      else if (d.type === "cover" && !d.coverFor) cur.error = "Choose who you covered for.";
+      else cur.error = "";
+      if (cur.error) { renderTherapist(); return; }
+      var e = { type: d.type, child: d.child, status: d.status };
+      if (d.type === "cover") e.coverFor = d.coverFor;
+      setEntry(cur.editing, e);
+    });
+  }
+  function setEntry(i, e) {
+    var key = dayKey();
+    if (!dayRecs[key]) dayRecs[key] = { rid: null, staffName: cur.staff, date: cur.date, entries: {}, submittedAt: "", updatedAt: "", lastEditedBy: "" };
+    if (e) dayRecs[key].entries[i] = e; else delete dayRecs[key].entries[i];
+    cur.editing = null; cur.review = false;
+    touchDay(false).then(function () { if (!failedSaves[key]) toast(e ? "Saved" : "Removed"); });
+    renderTherapist();
+  }
+  function renderAfter(state, entries, sugCount, d, editable) {
+    var box = $("sl-after"), keys = Object.keys(entries).sort(function (a, b) { return a - b; }), senior = isSenior(staffObj());
+    var dayName = DOW_LONG[d.getDay()] + " " + d.getDate() + " " + MON[d.getMonth()], key = dayKey();
+    if (cur.loading || state === "friday" || !keys.length) { box.innerHTML = ""; return; }
+    var line = countLine(countEntries(entries), senior);
+    if (isSubmitted(key)) {
+      box.innerHTML = '<p class="notice approved">Submitted ✓ ' + dayName + ": " + line + "." + (editable && !odEdit ? " Changing anything will ask you to review and submit again." : "") + "</p>";
+      return;
+    }
+    if (!editable) { box.innerHTML = '<p class="notice warn">This day was logged but never submitted, so it is not counted. Ask the Operations Director to correct it.</p>'; return; }
+    if (!cur.review) {
+      box.innerHTML = '<p class="notice warn">Not submitted yet. This day only counts after you review and approve it.</p><button class="btn wide" id="sl-review-open">Review and submit ' + dayName + "</button>";
+      $("sl-review-open").addEventListener("click", function () { cur.review = true; cur.editing = null; renderTherapist(); var rv = document.querySelector(".review"); if (rv) rv.scrollIntoView({ block: "nearest" }); });
+      return;
+    }
+    var h = '<div class="review"><h2>Review ' + dayName + "</h2><ul>" + keys.map(function (i) {
+      var e = entries[i];
+      return '<li><span class="time">' + slotLabel(+i) + '</span><span class="child">' + esc(e.child) + '</span><span class="pill t-' + esc(e.type) + '">' + (TYPES[e.type] || esc(e.type)) + "</span>" +
+        (e.type === "cover" && e.coverFor ? '<span class="hint">for ' + esc(e.coverFor) + "</span>" : "") + (e.status === "noshow" ? '<span class="pill noshow">No-show</span>' : "") + "</li>";
+    }).join("") + '</ul><p class="hint"><b>' + line + "</b></p>";
+    if (sugCount) h += '<p class="notice warn">' + sugCount + " from last week's schedule still unanswered above. They will not be counted unless you tap ✓ or No-show.</p>";
+    h += '<p class="hint">I confirm these are the sessions I delivered on this day.</p><div class="rowbtns"><button class="btn" id="sl-approve">Approve and submit</button><button class="btn secondary" id="sl-review-back">Back to edit</button></div></div>';
+    box.innerHTML = h;
+    $("sl-review-back").addEventListener("click", function () { cur.review = false; renderTherapist(); });
+    $("sl-approve").addEventListener("click", function () {
+      cur.review = false;
+      touchDay(true).then(function () { if (!failedSaves[key]) toast("Submitted ✓ " + dayName); });
+      renderTherapist();
+    });
+  }
+  function renderMonth(d) {
+    var month = cur.date.slice(0, 7), senior = isSenior(staffObj()), c = countMonth(cur.staff, month), rows = "";
+    var last = month === TODAY.slice(0, 7) ? TODAY : monthEnd(month);
+    for (var dt = last; dt.slice(0, 7) === month; dt = addDays(dt, -1)) {
+      var x = fromIso(dt); if (x.getDay() === 5) continue;
+      var k = cur.staff + "|" + dt, has = hasEntries(k);
+      var pill = !has ? '<span class="pill wait">Nothing logged</span>' : (isSubmitted(k) ? '<span class="pill ok">Submitted</span>' : '<span class="pill noshow">Not submitted</span>');
+      rows += '<button class="mrow" data-goto="' + dt + '" aria-current="' + (dt === cur.date) + '"><span class="md">' + DOW[x.getDay()] + " " + x.getDate() + " " + MON[x.getMonth()] + '</span><span class="mc">' + (has ? countLine(countEntries(dayEntries(k)), senior) : "") + "</span>" + pill + "</button>";
+    }
+    $("sl-month-title").textContent = (odEdit ? cur.staff + " · " : "My ") + MON_LONG[d.getMonth()];
+    $("sl-month-total").textContent = "Submitted so far: " + countLine(c, senior) + ". Tap a day to open it.";
+    $("sl-month").innerHTML = cur.loading ? "" : rows;
+    document.querySelectorAll("[data-goto]").forEach(function (b) { b.addEventListener("click", function () { goTo(b.getAttribute("data-goto")); $("sl-daylabel").scrollIntoView({ block: "center" }); }); });
+  }
+
+  // ================= gates and codes =================
+  var GATE = { entry: { key: "sessionLogAdminCodeHash", prefix: "ae" }, admin: { key: "sessionLogODCodeHash", prefix: "od" } };
+  function codeHash(which) { return settingVal(GATE[which].key, ""); }
+  function ccForm(which) {
+    var box = $("cc-" + which), id = "cc-" + which + "-";
+    box.innerHTML = '<div class="editor"><div><label for="' + id + 'cur">Current code</label><input type="password" id="' + id + 'cur" autocomplete="off"></div>' +
+      '<div><label for="' + id + 'new">New code (at least 4 characters)</label><input type="password" id="' + id + 'new" autocomplete="off"></div>' +
+      '<div><label for="' + id + 'rep">New code again</label><input type="password" id="' + id + 'rep" autocomplete="off"></div>' +
+      '<p class="err" id="' + id + 'err" hidden></p><div class="rowbtns"><button class="btn" id="' + id + 'save">Save new code</button><button class="btn secondary" id="' + id + 'cancel">Cancel</button></div></div>';
+    $(id + "cancel").addEventListener("click", function () { box.innerHTML = ""; });
+    $(id + "save").addEventListener("click", function () {
+      var c0 = $(id + "cur").value.trim(), nw = $(id + "new").value.trim(), rp = $(id + "rep").value.trim(), err = $(id + "err"), msg = "";
+      var other = which === "entry" ? "admin" : "entry", row = settings[GATE[which].key];
+      if (simpleHash(c0) !== codeHash(which)) msg = "The current code is not right.";
+      else if (nw.length < 4) msg = "The new code needs at least 4 characters.";
+      else if (nw !== rp) msg = "The two new codes do not match.";
+      else if (simpleHash(nw) === codeHash(other)) msg = "Choose a different code.";
+      else if (!row) msg = "This code can't be changed from here. Ask Dr. Haidy.";
+      if (msg) { err.textContent = msg; err.hidden = false; return; }
+      $(id + "save").disabled = true;
+      atUpdate(TABLES.settings, row.rid, { value: simpleHash(nw) }).then(function () {
+        row.value = simpleHash(nw); box.innerHTML = ""; toast("Code changed");
+      }, function () { err.textContent = "Could not save the new code. Check the connection and try again."; err.hidden = false; $(id + "save").disabled = false; });
+    });
+  }
+  function wireGate(which, rerender) {
+    var p = GATE[which].prefix;
+    function attempt() {
+      var h = codeHash(which);
+      if (h && simpleHash($(p + "-code").value.trim()) === h) { unlocked[which] = true; ssSet("zoud_sl_unlock_" + which, h); $(p + "-code").value = ""; $(p + "-err").hidden = true; rerender(); }
+      else $(p + "-err").hidden = false;
+    }
+    $(p + "-unlock").addEventListener("click", attempt);
+    $(p + "-code").addEventListener("keydown", function (e) { if (e.key === "Enter") attempt(); });
+    $(p + "-lock").addEventListener("click", function () { unlocked[which] = false; ssSet("zoud_sl_unlock_" + which, ""); $("cc-" + which).innerHTML = ""; if (which === "admin") stopOdEdit(); rerender(); });
+    $(p + "-change").addEventListener("click", function () { ccForm(which); });
+  }
+  function restoreUnlocks() {
+    // Unlock lasts for this browser tab only, and only while the stored hash still matches (so a changed code locks everyone out).
+    ["entry", "admin"].forEach(function (w) { var h = codeHash(w); unlocked[w] = !!h && ssGet("zoud_sl_unlock_" + w) === h; });
+  }
+  function monthOptions() {
+    var out = [], m = TODAY.slice(0, 7);
+    for (var i = 0; i < 6; i++) { out.push('<option value="' + m + '">' + monthLabel(m) + (i === 0 ? " (in progress)" : "") + "</option>"); m = prevMonth(m); }
+    return out.join("");
+  }
+
+  // ================= Admin count =================
+  function monthRec(key) { return monthRecs[key] || (monthRecs[key] = { rid: null, admin: {}, fin: {}, note: "" }); }
+  function renderEntry() {
+    $("ae-gate").hidden = unlocked.entry; $("ae-body").hidden = !unlocked.entry;
+    if (!unlocked.entry) return;
+    $("ae-month").value = adMonth;
+    if (!loadedMonthly[adMonth]) {
+      $("ae-rows").innerHTML = '<tr><td colspan="4">Loading…</td></tr>'; $("ae-status").textContent = "";
+      var m = adMonth;
+      ensureMonthly(m).then(function () { $("conn-banner").hidden = true; if (adMonth === m) renderEntry(); }, function () { $("conn-banner").hidden = false; $("ae-rows").innerHTML = '<tr><td colspan="4">Could not load. Check the connection.</td></tr>'; });
+      return;
+    }
+    var done = 0;
+    $("ae-rows").innerHTML = STAFF.map(function (st, idx) {
+      var senior = isSenior(st), a = (monthRecs[st.name + "|" + adMonth] || { admin: {} }).admin;
+      if (typeof a.s === "number") done++;
+      function inp(k) { return (k === "s" || senior) ? '<input class="ac" type="number" min="0" inputmode="numeric" id="ac-' + idx + "-" + k + '" data-ac="' + idx + '" data-k="' + k + '" value="' + (typeof a[k] === "number" ? a[k] : "") + '" aria-label="Admin count">' : "–"; }
+      return '<tr><td><div class="sname">' + esc(st.name) + '</div><div class="ssub">' + esc(st.roles.join(", ")) + (st.dept ? " · " + esc(st.dept) : "") + "</div></td><td>" + inp("s") + "</td><td>" + inp("sc") + "</td><td>" + inp("is") + "</td></tr>";
+    }).join("");
+    $("ae-status").textContent = done + " of " + STAFF.length + " specialists entered for " + monthLabel(adMonth) + ". Each number saves as you leave the box.";
+    document.querySelectorAll("#ae-rows input.ac").forEach(function (el) {
+      el.addEventListener("change", function () {
+        var key = STAFF[+el.getAttribute("data-ac")].name + "|" + adMonth, rec = monthRec(key), k = el.getAttribute("data-k");
+        if (el.value === "") delete rec.admin[k]; else rec.admin[k] = Math.max(0, parseInt(el.value, 10) || 0);
+        rec._touched = "admin"; saveMonthly(key);
+        var n = 0; STAFF.forEach(function (s) { var r = monthRecs[s.name + "|" + adMonth]; if (r && typeof r.admin.s === "number") n++; });
+        $("ae-status").textContent = n + " of " + STAFF.length + " specialists entered for " + monthLabel(adMonth) + ". Each number saves as you leave the box.";
+      });
+    });
+  }
+
+  // ================= Operations Director =================
+  var odLoadedFor = {};
+  function odRows() {
+    return STAFF.map(function (st) {
+      var c = countMonth(st.name, adMonth), senior = isSenior(st), rec = monthRecs[st.name + "|" + adMonth] || { admin: {}, fin: {}, note: "" };
+      var L = { s: c.session + c.cover, sc: c.screening, is: c.initial }, keys = senior ? ["s", "sc", "is"] : ["s"];
+      var filled = keys.filter(function (k) { return typeof rec.admin[k] === "number"; });
+      var diffKeys = filled.filter(function (k) { return rec.admin[k] !== L[k]; });
+      var decided = diffKeys.length > 0 && diffKeys.every(function (k) { return typeof rec.fin[k] === "number"; });
+      var fin = {};
+      keys.forEach(function (k) { fin[k] = typeof rec.admin[k] !== "number" ? undefined : (rec.admin[k] === L[k] ? L[k] : rec.fin[k]); });
+      return { st: st, senior: senior, c: c, L: L, rec: rec, keys: keys, filled: filled, diffKeys: diffKeys, decided: decided, fin: fin };
+    });
+  }
+  function renderAdmin() {
+    $("od-gate").hidden = unlocked.admin; $("od-body").hidden = !unlocked.admin;
+    if (!unlocked.admin) return;
+    $("ad-month").value = adMonth;
+    if (!odLoadedFor[adMonth]) {
+      $("ad-rows").innerHTML = '<tr><td colspan="8">Loading…</td></tr>'; $("ad-totals").innerHTML = ""; $("ad-flags").innerHTML = "";
+      var m = adMonth;
+      Promise.all([ensureAllDays(m, true), ensureMonthly(m, true), ensureCoverage(true)]).then(function () { odLoadedFor[m] = true; $("conn-banner").hidden = true; if (adMonth === m) renderAdmin(); },
+        function () { $("conn-banner").hidden = false; $("ad-rows").innerHTML = '<tr><td colspan="8">Could not load. Check the connection.</td></tr>'; });
+      return;
+    }
+    var names = { s: "sessions", sc: "screenings", is: "I.S" }, tot = { s: 0, sc: 0, is: 0 }, atot = { s: 0, sc: 0, is: 0 }, anyAdmin = false, undecided = 0, diffNames = [];
+    var rows = odRows();
+    $("ad-rows").innerHTML = rows.map(function (r, idx) {
+      ["s", "sc", "is"].forEach(function (k) { tot[k] += r.L[k]; if (typeof r.rec.admin[k] === "number") { atot[k] += r.rec.admin[k]; anyAdmin = true; } });
+      function adm(k) { return (k === "s" || r.senior) ? (typeof r.rec.admin[k] === "number" ? r.rec.admin[k] : '<span class="ssub">not yet</span>') : "–"; }
+      var diffs = r.diffKeys.map(function (k) { var d = r.L[k] - r.rec.admin[k]; return names[k] + " " + (d > 0 ? "+" : "") + d; });
+      var result;
+      if (!r.filled.length) result = '<span class="pill wait">Waiting for Admin count</span>';
+      else if (diffs.length) {
+        result = (r.decided ? '<span class="pill ok">Decided</span> ' : "") + '<span class="pill ' + (r.decided ? "wait" : "noshow") + '">Differs: ' + diffs.join(", ") + "</span>" +
+          r.diffKeys.map(function (k) { return '<div class="finrow"><label for="fin-' + idx + "-" + k + '">Final ' + names[k] + '</label><input class="ac fin" type="number" min="0" inputmode="numeric" id="fin-' + idx + "-" + k + '" data-fin="' + idx + '" data-k="' + k + '" value="' + (typeof r.rec.fin[k] === "number" ? r.rec.fin[k] : "") + '"></div>'; }).join("") +
+          '<div class="finrow"><input class="note" type="text" dir="auto" id="note-' + idx + '" data-note="' + idx + '" placeholder="Reason (optional)" value="' + esc(r.rec.note) + '" aria-label="Reason for the decision"></div>';
+        if (!r.decided) undecided++;
+        diffNames.push(r.st.name);
+      } else result = r.filled.length < r.keys.length ? '<span class="pill wait">Partly entered</span>' : '<span class="pill ok">Match</span>';
+      return '<tr><td><div class="sname">' + esc(r.st.name) + '</div><div class="ssub">' + esc(r.st.roles.join(", ")) + (r.st.dept ? " · " + esc(r.st.dept) : "") + '</div><button class="btn secondary small" style="margin-top:6px" data-open="' + idx + '">Open days</button></td>' +
+        '<td><span class="total">' + r.L.s + '</span><div class="ssub">' + r.c.cover + " cover · " + r.c.noshow + " no-show</div></td><td>" + adm("s") + '</td><td class="total">' + (r.senior ? r.L.sc : "–") + "</td><td>" + adm("sc") + '</td><td class="total">' + (r.senior ? r.L.is : "–") + "</td><td>" + adm("is") + "</td><td>" + result + "</td></tr>";
+    }).join("") || '<tr><td colspan="8">No specialists in the Staff Directory yet.</td></tr>';
+    $("ad-totals").innerHTML = [["Total sessions", "s"], ["Total screenings", "sc"], ["Total I.S", "is"]]
+      .map(function (t) { return '<div class="tot"><div class="n">' + tot[t[1]] + '</div><div class="k">' + t[0] + (anyAdmin ? "<br>Admin so far: " + atot[t[1]] : "") + "</div></div>"; }).join("");
+
+    document.querySelectorAll("input.fin").forEach(function (el) {
+      el.addEventListener("change", function () {
+        var key = STAFF[+el.getAttribute("data-fin")].name + "|" + adMonth, rec = monthRec(key), k = el.getAttribute("data-k");
+        if (el.value === "") delete rec.fin[k]; else rec.fin[k] = Math.max(0, parseInt(el.value, 10) || 0);
+        rec._touched = "final"; saveMonthly(key); renderAdmin();
+      });
+    });
+    document.querySelectorAll("input.note").forEach(function (el) {
+      el.addEventListener("change", function () { var key = STAFF[+el.getAttribute("data-note")].name + "|" + adMonth, rec = monthRec(key); rec.note = el.value.trim(); rec._touched = "final"; saveMonthly(key); });
+    });
+    document.querySelectorAll("[data-open]").forEach(function (b) {
+      b.addEventListener("click", function () {
+        odEdit = true; cur.staff = STAFF[+b.getAttribute("data-open")].name; $("sl-staff").value = cur.staff;
+        cur.date = adMonth === TODAY.slice(0, 7) ? TODAY : monthEnd(adMonth); cur.editing = null; cur.review = false;
+        show("therapist");
+      });
+    });
+
+    var flags = [];
+    if (diffNames.length) flags.push("Counts differ for <b>" + diffNames.map(esc).join(", ") + "</b>. Tap Open days on that line to see the month day by day, and correct a day if needed.");
+    if (undecided) flags.push("<b>" + undecided + "</b> specialist" + (undecided > 1 ? "s" : "") + " still need your decision: type the final number next to Differs.");
+    rows.forEach(function (r) {
+      var pend = r.c.pending.filter(function (dt) { return dt < TODAY; }).sort();
+      if (pend.length) flags.push("<b>" + esc(r.st.name) + "</b> logged " + pend.length + " day" + (pend.length > 1 ? "s" : "") + " without submitting (" + pend.map(function (dt) { var x = fromIso(dt); return x.getDate() + " " + MON[x.getMonth()]; }).join(", ") + "). Not counted until submitted.");
+    });
+    // A logged cover should have a matching entry in the main log's Session Coverage for the same day and absent therapist.
+    Object.keys(dayRecs).sort().forEach(function (k) {
+      var rec = dayRecs[k]; if (rec.date.slice(0, 7) !== adMonth) return;
+      Object.keys(rec.entries).forEach(function (i) {
+        var e = rec.entries[i]; if (e.type !== "cover") return;
+        var ok = (coverage || []).some(function (cv) { return String(cv.date || "").slice(0, 10) === rec.date && String(cv.originalTherapist || "").trim().toLowerCase() === String(e.coverFor || "").trim().toLowerCase() && cv.coverageStatus !== "cancelled"; });
+        var x = fromIso(rec.date);
+        if (!ok) flags.push("<b>" + esc(rec.staffName) + "</b> logged a cover for " + esc(e.coverFor) + " on " + DOW[x.getDay()] + " " + x.getDate() + " " + MON[x.getMonth()] + " (" + slotLabel(+i) + "), with no matching Session Coverage entry.");
+      });
+    });
+    $("ad-flags").innerHTML = flags.length ? flags.map(function (f) { return "<li>" + f + "</li>"; }).join("") : "<li>Nothing needs attention for this month.</li>";
+  }
+  function stopOdEdit() {
+    if (!odEdit) return;
+    odEdit = false;
+    var saved = lsGet("zoud_sl_staff"); cur.staff = saved && staffObj(saved) ? saved : ""; $("sl-staff").value = cur.staff;
+    cur.date = TODAY; cur.editing = null; cur.review = false;
+  }
+  function downloadCsv(name, rows) {
+    var text = "﻿" + rows.map(function (r) { return r.map(function (v) { v = v == null ? "" : String(v); return /[",\n]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v; }).join(","); }).join("\r\n");
+    var a = document.createElement("a"); a.href = URL.createObjectURL(new Blob([text], { type: "text/csv;charset=utf-8" })); a.download = name;
+    document.body.appendChild(a); a.click(); setTimeout(function () { URL.revokeObjectURL(a.href); a.remove(); }, 500);
+  }
+  $("ad-csv").addEventListener("click", function () {
+    function v(n) { return typeof n === "number" ? n : ""; }
+    var out = [["Specialist", "Title", "Department", "Sessions logged", "of which cover", "of which no-show", "Sessions Admin", "Sessions FINAL", "Screenings logged", "Screenings Admin", "Screenings FINAL", "I.S logged", "I.S Admin", "I.S FINAL", "Result", "Reason"]];
+    odRows().forEach(function (r) {
+      var res = !r.filled.length ? "Waiting for Admin count" : (r.diffKeys.length ? (r.decided ? "Decided" : "Differs - needs decision") : "Match");
+      out.push([r.st.name, r.st.roles.join(", "), r.st.dept, r.L.s, r.c.cover, r.c.noshow, v(r.rec.admin.s), v(r.fin.s),
+        r.senior ? r.L.sc : "", v(r.rec.admin.sc), v(r.fin.sc), r.senior ? r.L.is : "", v(r.rec.admin.is), v(r.fin.is), res, r.rec.note || ""]);
+    });
+    downloadCsv("Zoud-Session-Log-" + adMonth + ".csv", out);
+  });
+  $("ad-csv-detail").addEventListener("click", function () {
+    var out = [["Date", "Day", "Time", "Specialist", "Department", "Type", "Child", "Attendance", "Cover for", "Day submitted", "Last edited by"]];
+    Object.keys(dayRecs).sort(function (a, b) { var x = dayRecs[a], y = dayRecs[b]; return (x.date + x.staffName).localeCompare(y.date + y.staffName); }).forEach(function (k) {
+      var rec = dayRecs[k]; if (rec.date.slice(0, 7) !== adMonth) return;
+      var st = staffObj(rec.staffName);
+      Object.keys(rec.entries).sort(function (a, b) { return a - b; }).forEach(function (i) {
+        var e = rec.entries[i];
+        out.push([rec.date, DOW[fromIso(rec.date).getDay()], slotLabel(+i), rec.staffName, st ? st.dept : "", TYPES[e.type] || e.type, e.child, e.status === "noshow" ? "No-show" : "Attended", e.coverFor || "", rec.submittedAt ? "Yes" : "No", rec.lastEditedBy || ""]);
+      });
+    });
+    downloadCsv("Zoud-Session-Log-" + adMonth + "-all-sessions.csv", out);
+  });
+  $("ad-refresh").addEventListener("click", function () { odLoadedFor[adMonth] = false; renderAdmin(); });
+
+  // ================= view switch and start =================
+  var view = "therapist";
+  function show(which) {
+    if (which !== "therapist" && odEdit) stopOdEdit();
+    view = which;
+    $("view-therapist").hidden = which !== "therapist"; $("view-entry").hidden = which !== "entry"; $("view-admin").hidden = which !== "admin";
+    $("shell").className = "shell" + (which === "admin" && unlocked.admin ? " wide" : "");
+    ["therapist", "entry", "admin"].forEach(function (w) { $("tab-" + w).setAttribute("aria-selected", which === w); });
+    if (which === "admin") { odLoadedFor[adMonth] = false; renderAdmin(); $("shell").className = "shell" + (unlocked.admin ? " wide" : ""); }
+    else if (which === "entry") renderEntry(); else loadAndRender();
+  }
+  ["therapist", "entry", "admin"].forEach(function (w) { $("tab-" + w).addEventListener("click", function () { show(w); }); });
+  wireGate("entry", renderEntry);
+  wireGate("admin", function () { odLoadedFor[adMonth] = false; renderAdmin(); $("shell").className = "shell" + (view === "admin" && unlocked.admin ? " wide" : ""); });
+  $("ae-month").innerHTML = monthOptions(); $("ad-month").innerHTML = monthOptions();
+  $("ae-month").addEventListener("change", function () { adMonth = this.value; renderEntry(); });
+  $("ad-month").addEventListener("change", function () { adMonth = this.value; renderAdmin(); });
+
+  boot().then(function () {
+    restoreUnlocks(); fillStaffSelect();
+    if (fromIso(TODAY).getDay() === 5) cur.date = addDays(TODAY, -1);
+    show("therapist");
+  }, function (err) {
+    if (window.console) console.error("Session Log failed to load", err);
+    $("conn-banner").hidden = false; $("sl-staff").innerHTML = '<option value="">Could not load</option>';
+  });
+})();
+</script>
+</body>
+</html>

@@ -216,6 +216,19 @@
      to clear this (display:"") once managerUnlocked is confirmed true. */
   #manager-only-top, #manager-only-cards, #manager-only-feed { display: none; }
 
+  /* Session Log link (added 2026-10-07) — opens the standalone
+     session-log/ page where specialists log their daily sessions. */
+  .sl-link {
+    display: flex; align-items: center; gap: 12px; text-decoration: none;
+    background: var(--accent); color: #fff; border-radius: var(--radius);
+    padding: 14px 16px; margin-bottom: 10px; box-shadow: var(--shadow);
+  }
+  .sl-link .sl-link-icon { width: 38px; height: 38px; border-radius: 10px; background: rgba(255,255,255,0.18); display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+  .sl-link .sl-link-icon svg { width: 19px; height: 19px; }
+  .sl-link .sl-link-title { font-weight: 700; font-size: 15px; }
+  .sl-link .sl-link-sub { font-size: 12px; opacity: 0.85; margin-top: 1px; }
+  @media (prefers-color-scheme: dark) { .sl-link { color: #1B1330; } }
+
   /* action cards */
   .action {
     background: var(--surface);
@@ -609,6 +622,16 @@
     <label for="who-input" style="margin:0;">Logging as *</label>
     <input type="text" dir="auto" id="who-input" list="names-list" placeholder="Your name" style="max-width:140px;">
   </div>
+
+  <!-- SESSION LOG (added 2026-10-07) — link to the standalone page
+       (session-log/index.html, same repo, same Airtable base) where
+       specialists log their sessions day by day; the Admin count and the
+       Operations Director's matching view live on that page too, each
+       behind its own code. Visible to everyone, locked or unlocked. -->
+  <a class="sl-link" href="session-log/">
+    <span class="sl-link-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2"></rect><path d="M16 2v4M8 2v4M3 10h18"></path><path d="M8 15l3 3 5-6"></path></svg></span>
+    <span><div class="sl-link-title">Session Log</div><div class="sl-link-sub">Log your sessions for today and submit them</div></span>
+  </a>
 
   <div class="action" id="action-wish" data-open="false">
     <button class="action-head" data-toggle="action-wish">
