@@ -164,7 +164,6 @@
 
   <div class="viewtabs" role="tablist">
     <button class="viewtab" role="tab" id="tab-therapist" aria-selected="true">My sessions</button>
-    <button class="viewtab" role="tab" id="tab-entry" aria-selected="false">Admin count</button>
     <button class="viewtab" role="tab" id="tab-admin" aria-selected="false">Operations Director</button>
   </div>
 
@@ -207,38 +206,11 @@
     </div>
   </section>
 
-  <!-- ADMIN COUNT -->
-  <section id="view-entry" class="stack" hidden>
-    <div class="card" id="ae-gate">
-      <h2>Admin only</h2>
-      <p class="hint">Enter the Admin code to add the monthly count.</p>
-      <div><label for="ae-code">Code</label><input type="password" id="ae-code" autocomplete="off"></div>
-      <p class="err" id="ae-err" hidden>That code is not right.</p>
-      <button class="btn" id="ae-unlock">Unlock</button>
-    </div>
-    <div class="card" id="ae-body" hidden>
-      <div><label for="ae-month">Month</label><select id="ae-month"></select></div>
-      <p class="hint">Enter your own monthly count for each specialist. Sessions = regular plus cover sessions, including no-shows. What the specialists logged is not shown here, so the two counts stay independent.</p>
-      <div class="tablewrap">
-        <table>
-          <thead><tr><th>Specialist</th><th>Sessions</th><th>Screenings</th><th>I.S</th></tr></thead>
-          <tbody id="ae-rows"></tbody>
-        </table>
-      </div>
-      <p class="hint" id="ae-status"></p>
-      <div class="rowbtns">
-        <button class="btn secondary small" id="ae-change">Change code</button>
-        <button class="btn secondary small" id="ae-lock">Lock this tab</button>
-      </div>
-      <div id="cc-entry"></div>
-    </div>
-  </section>
-
   <!-- OPERATIONS DIRECTOR -->
   <section id="view-admin" class="stack" hidden>
     <div class="card" id="od-gate">
       <h2>Operations Director only</h2>
-      <p class="hint">This tab has its own code, separate from Manager Access and from the Admin code.</p>
+      <p class="hint">This tab has its own code, separate from Manager Access.</p>
       <div><label for="od-code">Code</label><input type="password" id="od-code" autocomplete="off"></div>
       <p class="err" id="od-err" hidden>That code is not right.</p>
       <button class="btn" id="od-unlock">Unlock</button>
@@ -246,14 +218,11 @@
     <div class="stack" id="od-body" hidden>
       <div class="card">
         <div><label for="ad-month">Month</label><select id="ad-month"></select></div>
-        <p class="hint">What each specialist logged and submitted, next to Admin's own count. Only the lines marked Differs need your attention: check the schedule and cameras, then type the final number. That final number is what goes to accounts.</p>
+        <p class="hint">What each specialist logged and submitted this month. Download it to compare with the Odoo count. If a number is wrong, tap Open days on that line and correct the day.</p>
         <div class="totals" id="ad-totals"></div>
         <div class="tablewrap">
           <table>
-            <thead>
-              <tr><th rowspan="2">Specialist</th><th colspan="2">Sessions</th><th colspan="2">Screenings</th><th colspan="2">I.S</th><th rowspan="2">Result</th></tr>
-              <tr><th>Logged</th><th>Admin</th><th>Logged</th><th>Admin</th><th>Logged</th><th>Admin</th></tr>
-            </thead>
+            <thead><tr><th>Specialist</th><th>Sessions</th><th>Screenings</th><th>I.S</th><th>Days submitted</th></tr></thead>
             <tbody id="ad-rows"></tbody>
           </table>
         </div>
@@ -287,7 +256,7 @@
   var TABLES = {
     settings: "tbl3zu3LTYnUL3du9", staffDirectory: "tbl4EGUFtysEup8tb", sessionCoverage: "tblbP56lQeaZ5SPXu",
     days: "tblJk7uMHdZrpf0bU",      // SessionLogDays: one record per specialist per day
-    monthly: "tblIEKUTS32bPX3GS"    // SessionLogMonthly: Admin count + Operations Director decision
+    monthly: "tblIEKUTS32bPX3GS"    // SessionLogMonthly: no longer used by the page (Admin count tab removed 2026-10-07; Admin counts in Odoo)
   };
   var SLOT_COUNT = 15, SLOT_MIN = 45, START_MIN = 9 * 60;   // 9:00 → 8:15 pm, as in the paper signing sheet
   // Who logs sessions, and which types each title may log (per Haidy, 2026-10-07).
@@ -407,18 +376,6 @@
     if (loadedMonths["*|" + month] && !force) return Promise.resolve();
     return atList(TABLES.days, "{month}=" + fq(month)).then(function (recs) { recs.forEach(mergeDayRecord); loadedMonths["*|" + month] = true; });
   }
-  function ensureMonthly(month, force) {
-    if (loadedMonthly[month] && !force) return Promise.resolve();
-    return atList(TABLES.monthly, "{month}=" + fq(month)).then(function (recs) {
-      recs.forEach(function (r) {
-        var f = r.fields || {}, key = f.key || (f.staffName + "|" + f.month), ex = monthRecs[key];
-        if (ex && ex._saving) return;
-        function n(v) { return typeof v === "number" ? v : undefined; }
-        monthRecs[key] = { rid: r.id, admin: { s: n(f.adminSessions), sc: n(f.adminScreenings), is: n(f.adminInitials) }, fin: { s: n(f.finalSessions), sc: n(f.finalScreenings), is: n(f.finalInitials) }, note: f.finalNote || "" };
-      });
-      loadedMonthly[month] = true;
-    });
-  }
   function ensureCoverage(force) {
     if (coverage && !force) return Promise.resolve();
     return atList(TABLES.sessionCoverage).then(function (recs) { coverage = recs.map(function (r) { return r.fields || {}; }); }).catch(function () { coverage = []; });
@@ -475,24 +432,6 @@
     if (odEdit) rec.submittedAt = rec.submittedAt || new Date().toISOString();
     else rec.submittedAt = submit ? new Date().toISOString() : "";
     return saveDay(key);
-  }
-  function saveMonthly(key) {
-    var rec = monthRecs[key]; if (!rec) return Promise.resolve();
-    rec._saving = (rec._saving || 0) + 1;
-    rec._chain = (rec._chain || Promise.resolve()).then(function () {
-      var p = key.split("|"), now = new Date().toISOString();
-      function v(n) { return typeof n === "number" ? n : null; }
-      // Send only the side that was edited, so Admin and the Operations Director never overwrite each other's numbers with a stale copy.
-      var fields = { key: key, staffName: p[0], month: p[1] };
-      if (rec._touched === "admin") { fields.adminSessions = v(rec.admin.s); fields.adminScreenings = v(rec.admin.sc); fields.adminInitials = v(rec.admin.is); fields.adminUpdatedAt = now; }
-      else { fields.finalSessions = v(rec.fin.s); fields.finalScreenings = v(rec.fin.sc); fields.finalInitials = v(rec.fin.is); fields.finalNote = rec.note || ""; fields.finalDecidedAt = now; }
-      if (rec.rid) return atUpdate(TABLES.monthly, rec.rid, fields);
-      return atCreate(TABLES.monthly, fields).then(function (r) { rec.rid = r.id; });
-    }).then(function () { delete failedSaves["m:" + key]; toast("Saved"); }, function (err) {
-      if (window.console) console.error("Session Log monthly save failed", err);
-      failedSaves["m:" + key] = function () { return saveMonthly(key); };
-    }).then(function () { rec._saving--; showSaveBanner(); });
-    return rec._chain;
   }
   $("save-retry").addEventListener("click", function () {
     var fns = Object.keys(failedSaves).map(function (k) { return failedSaves[k]; });
@@ -816,7 +755,7 @@
   }
 
   // ================= gates and codes =================
-  var GATE = { entry: { key: "sessionLogAdminCodeHash", prefix: "ae" }, admin: { key: "sessionLogODCodeHash", prefix: "od" } };
+  var GATE = { admin: { key: "sessionLogODCodeHash", prefix: "od" } };
   function codeHash(which) { return settingVal(GATE[which].key, ""); }
   function ccForm(which) {
     var box = $("cc-" + which), id = "cc-" + which + "-";
@@ -827,11 +766,10 @@
     $(id + "cancel").addEventListener("click", function () { box.innerHTML = ""; });
     $(id + "save").addEventListener("click", function () {
       var c0 = $(id + "cur").value.trim(), nw = $(id + "new").value.trim(), rp = $(id + "rep").value.trim(), err = $(id + "err"), msg = "";
-      var other = which === "entry" ? "admin" : "entry", row = settings[GATE[which].key];
+      var row = settings[GATE[which].key];
       if (simpleHash(c0) !== codeHash(which)) msg = "The current code is not right.";
       else if (nw.length < 4) msg = "The new code needs at least 4 characters.";
       else if (nw !== rp) msg = "The two new codes do not match.";
-      else if (simpleHash(nw) === codeHash(other)) msg = "Choose a different code.";
       else if (!row) msg = "This code can't be changed from here. Ask Dr. Haidy.";
       if (msg) { err.textContent = msg; err.hidden = false; return; }
       $(id + "save").disabled = true;
@@ -854,7 +792,7 @@
   }
   function restoreUnlocks() {
     // Unlock lasts for this browser tab only, and only while the stored hash still matches (so a changed code locks everyone out).
-    ["entry", "admin"].forEach(function (w) { var h = codeHash(w); unlocked[w] = !!h && ssGet("zoud_sl_unlock_" + w) === h; });
+    ["admin"].forEach(function (w) { var h = codeHash(w); unlocked[w] = !!h && ssGet("zoud_sl_unlock_" + w) === h; });
   }
   function monthOptions() {
     var out = [], m = TODAY.slice(0, 7);
@@ -862,49 +800,13 @@
     return out.join("");
   }
 
-  // ================= Admin count =================
-  function monthRec(key) { return monthRecs[key] || (monthRecs[key] = { rid: null, admin: {}, fin: {}, note: "" }); }
-  function renderEntry() {
-    $("ae-gate").hidden = unlocked.entry; $("ae-body").hidden = !unlocked.entry;
-    if (!unlocked.entry) return;
-    $("ae-month").value = adMonth;
-    if (!loadedMonthly[adMonth]) {
-      $("ae-rows").innerHTML = '<tr><td colspan="4">Loading…</td></tr>'; $("ae-status").textContent = "";
-      var m = adMonth;
-      ensureMonthly(m).then(function () { $("conn-banner").hidden = true; if (adMonth === m) renderEntry(); }, function () { $("conn-banner").hidden = false; $("ae-rows").innerHTML = '<tr><td colspan="4">Could not load. Check the connection.</td></tr>'; });
-      return;
-    }
-    var done = 0;
-    $("ae-rows").innerHTML = STAFF.map(function (st, idx) {
-      var senior = isSenior(st), a = (monthRecs[st.name + "|" + adMonth] || { admin: {} }).admin;
-      if (typeof a.s === "number") done++;
-      function inp(k) { return (k === "s" || senior) ? '<input class="ac" type="number" min="0" inputmode="numeric" id="ac-' + idx + "-" + k + '" data-ac="' + idx + '" data-k="' + k + '" value="' + (typeof a[k] === "number" ? a[k] : "") + '" aria-label="Admin count">' : "–"; }
-      return '<tr><td><div class="sname">' + esc(st.name) + '</div><div class="ssub">' + esc(st.roles.join(", ")) + (st.dept ? " · " + esc(st.dept) : "") + "</div></td><td>" + inp("s") + "</td><td>" + inp("sc") + "</td><td>" + inp("is") + "</td></tr>";
-    }).join("");
-    $("ae-status").textContent = done + " of " + STAFF.length + " specialists entered for " + monthLabel(adMonth) + ". Each number saves as you leave the box.";
-    document.querySelectorAll("#ae-rows input.ac").forEach(function (el) {
-      el.addEventListener("change", function () {
-        var key = STAFF[+el.getAttribute("data-ac")].name + "|" + adMonth, rec = monthRec(key), k = el.getAttribute("data-k");
-        if (el.value === "") delete rec.admin[k]; else rec.admin[k] = Math.max(0, parseInt(el.value, 10) || 0);
-        rec._touched = "admin"; saveMonthly(key);
-        var n = 0; STAFF.forEach(function (s) { var r = monthRecs[s.name + "|" + adMonth]; if (r && typeof r.admin.s === "number") n++; });
-        $("ae-status").textContent = n + " of " + STAFF.length + " specialists entered for " + monthLabel(adMonth) + ". Each number saves as you leave the box.";
-      });
-    });
-  }
-
   // ================= Operations Director =================
   var odLoadedFor = {};
   function odRows() {
     return STAFF.map(function (st) {
-      var c = countMonth(st.name, adMonth), senior = isSenior(st), rec = monthRecs[st.name + "|" + adMonth] || { admin: {}, fin: {}, note: "" };
-      var L = { s: c.session + c.cover, sc: c.screening, is: c.initial }, keys = senior ? ["s", "sc", "is"] : ["s"];
-      var filled = keys.filter(function (k) { return typeof rec.admin[k] === "number"; });
-      var diffKeys = filled.filter(function (k) { return rec.admin[k] !== L[k]; });
-      var decided = diffKeys.length > 0 && diffKeys.every(function (k) { return typeof rec.fin[k] === "number"; });
-      var fin = {};
-      keys.forEach(function (k) { fin[k] = typeof rec.admin[k] !== "number" ? undefined : (rec.admin[k] === L[k] ? L[k] : rec.fin[k]); });
-      return { st: st, senior: senior, c: c, L: L, rec: rec, keys: keys, filled: filled, diffKeys: diffKeys, decided: decided, fin: fin };
+      var c = countMonth(st.name, adMonth), days = 0;
+      Object.keys(dayRecs).forEach(function (k) { var r = dayRecs[k]; if (r.staffName === st.name && r.date.slice(0, 7) === adMonth && r.submittedAt && Object.keys(r.entries).length) days++; });
+      return { st: st, senior: isSenior(st), c: c, L: { s: c.session + c.cover, sc: c.screening, is: c.initial }, days: days };
     });
   }
   function renderAdmin() {
@@ -912,43 +814,20 @@
     if (!unlocked.admin) return;
     $("ad-month").value = adMonth;
     if (!odLoadedFor[adMonth]) {
-      $("ad-rows").innerHTML = '<tr><td colspan="8">Loading…</td></tr>'; $("ad-totals").innerHTML = ""; $("ad-flags").innerHTML = "";
+      $("ad-rows").innerHTML = '<tr><td colspan="5">Loading…</td></tr>'; $("ad-totals").innerHTML = ""; $("ad-flags").innerHTML = "";
       var m = adMonth;
-      Promise.all([ensureAllDays(m, true), ensureMonthly(m, true), ensureCoverage(true)]).then(function () { odLoadedFor[m] = true; $("conn-banner").hidden = true; if (adMonth === m) renderAdmin(); },
-        function () { $("conn-banner").hidden = false; $("ad-rows").innerHTML = '<tr><td colspan="8">Could not load. Check the connection.</td></tr>'; });
+      Promise.all([ensureAllDays(m, true), ensureCoverage(true)]).then(function () { odLoadedFor[m] = true; $("conn-banner").hidden = true; if (adMonth === m) renderAdmin(); },
+        function () { $("conn-banner").hidden = false; $("ad-rows").innerHTML = '<tr><td colspan="5">Could not load. Check the connection.</td></tr>'; });
       return;
     }
-    var names = { s: "sessions", sc: "screenings", is: "I.S" }, tot = { s: 0, sc: 0, is: 0 }, atot = { s: 0, sc: 0, is: 0 }, anyAdmin = false, undecided = 0, diffNames = [];
-    var rows = odRows();
+    var tot = { s: 0, sc: 0, is: 0 }, rows = odRows();
     $("ad-rows").innerHTML = rows.map(function (r, idx) {
-      ["s", "sc", "is"].forEach(function (k) { tot[k] += r.L[k]; if (typeof r.rec.admin[k] === "number") { atot[k] += r.rec.admin[k]; anyAdmin = true; } });
-      function adm(k) { return (k === "s" || r.senior) ? (typeof r.rec.admin[k] === "number" ? r.rec.admin[k] : '<span class="ssub">not yet</span>') : "–"; }
-      var diffs = r.diffKeys.map(function (k) { var d = r.L[k] - r.rec.admin[k]; return names[k] + " " + (d > 0 ? "+" : "") + d; });
-      var result;
-      if (!r.filled.length) result = '<span class="pill wait">Waiting for Admin count</span>';
-      else if (diffs.length) {
-        result = (r.decided ? '<span class="pill ok">Decided</span> ' : "") + '<span class="pill ' + (r.decided ? "wait" : "noshow") + '">Differs: ' + diffs.join(", ") + "</span>" +
-          r.diffKeys.map(function (k) { return '<div class="finrow"><label for="fin-' + idx + "-" + k + '">Final ' + names[k] + '</label><input class="ac fin" type="number" min="0" inputmode="numeric" id="fin-' + idx + "-" + k + '" data-fin="' + idx + '" data-k="' + k + '" value="' + (typeof r.rec.fin[k] === "number" ? r.rec.fin[k] : "") + '"></div>'; }).join("") +
-          '<div class="finrow"><input class="note" type="text" dir="auto" id="note-' + idx + '" data-note="' + idx + '" placeholder="Reason (optional)" value="' + esc(r.rec.note) + '" aria-label="Reason for the decision"></div>';
-        if (!r.decided) undecided++;
-        diffNames.push(r.st.name);
-      } else result = r.filled.length < r.keys.length ? '<span class="pill wait">Partly entered</span>' : '<span class="pill ok">Match</span>';
+      ["s", "sc", "is"].forEach(function (k) { tot[k] += r.L[k]; });
       return '<tr><td><div class="sname">' + esc(r.st.name) + '</div><div class="ssub">' + esc(r.st.roles.join(", ")) + (r.st.dept ? " · " + esc(r.st.dept) : "") + '</div><button class="btn secondary small" style="margin-top:6px" data-open="' + idx + '">Open days</button> <button class="btn secondary small" style="margin-top:6px" data-reset="' + idx + '">Reset code</button></td>' +
-        '<td><span class="total">' + r.L.s + '</span><div class="ssub">' + r.c.cover + " cover · " + r.c.noshow + " no-show</div></td><td>" + adm("s") + '</td><td class="total">' + (r.senior ? r.L.sc : "–") + "</td><td>" + adm("sc") + '</td><td class="total">' + (r.senior ? r.L.is : "–") + "</td><td>" + adm("is") + "</td><td>" + result + "</td></tr>";
-    }).join("") || '<tr><td colspan="8">No specialists in the Staff Directory yet.</td></tr>';
+        '<td><span class="total">' + r.L.s + '</span><div class="ssub">' + r.c.cover + " cover · " + r.c.noshow + ' no-show</div></td><td class="total">' + (r.senior ? r.L.sc : "–") + '</td><td class="total">' + (r.senior ? r.L.is : "–") + "</td><td>" + r.days + (r.c.pending.length ? '<div class="ssub">' + r.c.pending.length + " not submitted</div>" : "") + "</td></tr>";
+    }).join("") || '<tr><td colspan="5">No specialists in the Staff Directory yet.</td></tr>';
     $("ad-totals").innerHTML = [["Total sessions", "s"], ["Total screenings", "sc"], ["Total I.S", "is"]]
-      .map(function (t) { return '<div class="tot"><div class="n">' + tot[t[1]] + '</div><div class="k">' + t[0] + (anyAdmin ? "<br>Admin so far: " + atot[t[1]] : "") + "</div></div>"; }).join("");
-
-    document.querySelectorAll("input.fin").forEach(function (el) {
-      el.addEventListener("change", function () {
-        var key = STAFF[+el.getAttribute("data-fin")].name + "|" + adMonth, rec = monthRec(key), k = el.getAttribute("data-k");
-        if (el.value === "") delete rec.fin[k]; else rec.fin[k] = Math.max(0, parseInt(el.value, 10) || 0);
-        rec._touched = "final"; saveMonthly(key); renderAdmin();
-      });
-    });
-    document.querySelectorAll("input.note").forEach(function (el) {
-      el.addEventListener("change", function () { var key = STAFF[+el.getAttribute("data-note")].name + "|" + adMonth, rec = monthRec(key); rec.note = el.value.trim(); rec._touched = "final"; saveMonthly(key); });
-    });
+      .map(function (t) { return '<div class="tot"><div class="n">' + tot[t[1]] + '</div><div class="k">' + t[0] + "</div></div>"; }).join("");
     document.querySelectorAll("[data-open]").forEach(function (b) {
       b.addEventListener("click", function () {
         odEdit = true; cur.staff = STAFF[+b.getAttribute("data-open")].name; $("sl-staff").value = cur.staff;
@@ -969,8 +848,6 @@
     });
 
     var flags = [];
-    if (diffNames.length) flags.push("Counts differ for <b>" + diffNames.map(esc).join(", ") + "</b>. Tap Open days on that line to see the month day by day, and correct a day if needed.");
-    if (undecided) flags.push("<b>" + undecided + "</b> specialist" + (undecided > 1 ? "s" : "") + " still need your decision: type the final number next to Differs.");
     rows.forEach(function (r) {
       var pend = r.c.pending.filter(function (dt) { return dt < TODAY; }).sort();
       if (pend.length) flags.push("<b>" + esc(r.st.name) + "</b> logged " + pend.length + " day" + (pend.length > 1 ? "s" : "") + " without submitting (" + pend.map(function (dt) { var x = fromIso(dt); return x.getDate() + " " + MON[x.getMonth()]; }).join(", ") + "). Not counted until submitted.");
@@ -999,13 +876,8 @@
     document.body.appendChild(a); a.click(); setTimeout(function () { URL.revokeObjectURL(a.href); a.remove(); }, 500);
   }
   $("ad-csv").addEventListener("click", function () {
-    function v(n) { return typeof n === "number" ? n : ""; }
-    var out = [["Specialist", "Title", "Department", "Sessions logged", "of which cover", "of which no-show", "Sessions Admin", "Sessions FINAL", "Screenings logged", "Screenings Admin", "Screenings FINAL", "I.S logged", "I.S Admin", "I.S FINAL", "Result", "Reason"]];
-    odRows().forEach(function (r) {
-      var res = !r.filled.length ? "Waiting for Admin count" : (r.diffKeys.length ? (r.decided ? "Decided" : "Differs - needs decision") : "Match");
-      out.push([r.st.name, r.st.roles.join(", "), r.st.dept, r.L.s, r.c.cover, r.c.noshow, v(r.rec.admin.s), v(r.fin.s),
-        r.senior ? r.L.sc : "", v(r.rec.admin.sc), v(r.fin.sc), r.senior ? r.L.is : "", v(r.rec.admin.is), v(r.fin.is), res, r.rec.note || ""]);
-    });
+    var out = [["Specialist", "Title", "Department", "Total sessions", "of which cover", "of which no-show", "Screenings", "I.S", "Days submitted", "Days logged but not submitted"]];
+    odRows().forEach(function (r) { out.push([r.st.name, r.st.roles.join(", "), r.st.dept, r.L.s, r.c.cover, r.c.noshow, r.senior ? r.L.sc : "", r.senior ? r.L.is : "", r.days, r.c.pending.length]); });
     downloadCsv("Zoud-Session-Log-" + adMonth + ".csv", out);
   });
   $("ad-csv-detail").addEventListener("click", function () {
@@ -1027,17 +899,15 @@
   function show(which) {
     if (which !== "therapist" && odEdit) stopOdEdit();
     view = which;
-    $("view-therapist").hidden = which !== "therapist"; $("view-entry").hidden = which !== "entry"; $("view-admin").hidden = which !== "admin";
+    $("view-therapist").hidden = which !== "therapist"; $("view-admin").hidden = which !== "admin";
     $("shell").className = "shell" + (which === "admin" && unlocked.admin ? " wide" : "");
-    ["therapist", "entry", "admin"].forEach(function (w) { $("tab-" + w).setAttribute("aria-selected", which === w); });
+    ["therapist", "admin"].forEach(function (w) { $("tab-" + w).setAttribute("aria-selected", which === w); });
     if (which === "admin") { odLoadedFor[adMonth] = false; renderAdmin(); $("shell").className = "shell" + (unlocked.admin ? " wide" : ""); }
-    else if (which === "entry") renderEntry(); else loadAndRender();
+    else loadAndRender();
   }
-  ["therapist", "entry", "admin"].forEach(function (w) { $("tab-" + w).addEventListener("click", function () { show(w); }); });
-  wireGate("entry", renderEntry);
+  ["therapist", "admin"].forEach(function (w) { $("tab-" + w).addEventListener("click", function () { show(w); }); });
   wireGate("admin", function () { odLoadedFor[adMonth] = false; renderAdmin(); $("shell").className = "shell" + (view === "admin" && unlocked.admin ? " wide" : ""); });
-  $("ae-month").innerHTML = monthOptions(); $("ad-month").innerHTML = monthOptions();
-  $("ae-month").addEventListener("change", function () { adMonth = this.value; renderEntry(); });
+  $("ad-month").innerHTML = monthOptions();
   $("ad-month").addEventListener("change", function () { adMonth = this.value; renderAdmin(); });
 
   boot().then(function () {
