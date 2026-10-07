@@ -178,7 +178,14 @@
       </div>
       <div id="sl-roles" class="chip-row"></div>
       <div class="summary" id="sl-summary" hidden></div>
+      <div class="rowbtns" id="sl-authbtns" hidden>
+        <button class="btn secondary small" id="sl-changecode">Change my code</button>
+        <button class="btn secondary small" id="sl-lock">Lock</button>
+      </div>
+      <div id="sl-cc"></div>
     </div>
+
+    <div class="card" id="sl-gate" hidden></div>
 
     <div class="card" id="sl-daycard" hidden>
       <div class="daybar">
@@ -418,7 +425,7 @@
   }
   function boot() {
     var staffP = atList(TABLES.staffDirectory).then(function (recs) {
-      STAFF = recs.map(function (r) { var f = r.fields || {}; return { name: f.name || "", roles: f.roles || [], dept: f.department || "", active: f.active === true }; })
+      STAFF = recs.map(function (r) { var f = r.fields || {}; return { rid: r.id, name: f.name || "", roles: f.roles || [], dept: f.department || "", active: f.active === true, hash: f.sessionLogCodeHash || "" }; })
         .filter(function (p) { return p.active && p.name && p.roles.some(function (r) { return LOGGING_ROLES.indexOf(r) >= 0; }); })
         .sort(function (a, b) { return a.name.localeCompare(b.name); });
     });
@@ -509,6 +516,74 @@
     var n = c.session + c.cover; return n + (n === 1 ? " session" : " sessions") + (c.cover ? " (" + c.cover + " cover)" : "") + (senior ? " · " + c.screening + " screening · " + c.initial + " I.S" : "") + (c.noshow ? " · incl. " + c.noshow + " no-show" : "");
   }
 
+  // ================= personal codes =================
+  // Each specialist has their own code (added 2026-10-07, per Haidy) so nobody can open or change
+  // a colleague's sessions. The hash lives on their Staff Directory row; the phone remembers it.
+  // Like the other codes on this site it gates the interface, it is not real per-user security.
+  function personHash(name, code) { return simpleHash(name + "|" + code); }
+  function isAuthed(st) { return !!st && (odEdit || (!!st.hash && lsGet("zoud_sl_auth_" + st.name) === st.hash)); }
+  function freshHash(st) {
+    return atRequest("GET", AIRTABLE_BASE, TABLES.staffDirectory, { path: "/" + st.rid }).then(function (r) { st.hash = (r.fields && r.fields.sessionLogCodeHash) || ""; return st.hash; });
+  }
+  var gateKey = "";
+  function renderGate(st) {
+    var box = $("sl-gate"), key = st.name + "|" + (st.hash ? "enter" : "create");
+    if (gateKey === key) return;
+    gateKey = key;
+    if (!st.hash) {
+      box.innerHTML = '<h2>Create your code</h2><p class="hint">First time here. Choose a code only you know, at least 4 characters. Your phone will remember it; you will need it again on another device.</p>' +
+        '<div><label for="pc-new">New code</label><input type="password" id="pc-new" autocomplete="off"></div>' +
+        '<div><label for="pc-rep">New code again</label><input type="password" id="pc-rep" autocomplete="off"></div>' +
+        '<p class="err" id="pc-err" hidden></p><button class="btn" id="pc-go">Create code and continue</button>';
+      $("pc-go").addEventListener("click", function () {
+        var nw = $("pc-new").value.trim(), rp = $("pc-rep").value.trim(), err = $("pc-err"), msg = "";
+        if (nw.length < 4) msg = "The code needs at least 4 characters."; else if (nw !== rp) msg = "The two codes do not match.";
+        if (msg) { err.textContent = msg; err.hidden = false; return; }
+        $("pc-go").disabled = true;
+        // Re-check first: someone may have created a code for this name since the page loaded.
+        freshHash(st).then(function (h) {
+          if (h) { gateKey = ""; renderTherapist(); var e2 = $("pc-err"); if (e2) { e2.textContent = "A code already exists for this name. Enter it, or ask the Operations Director to reset it."; e2.hidden = false; } return; }
+          var hash = personHash(st.name, nw);
+          return atUpdate(TABLES.staffDirectory, st.rid, { sessionLogCodeHash: hash }).then(function () { st.hash = hash; lsSet("zoud_sl_auth_" + st.name, hash); gateKey = ""; toast("Code created"); loadAndRender(); });
+        }).catch(function () { err.textContent = "Could not save. Check the connection and try again."; err.hidden = false; $("pc-go").disabled = false; });
+      });
+    } else {
+      box.innerHTML = '<h2>Enter your code</h2><div><label for="pc-code">Code for ' + esc(st.name) + '</label><input type="password" id="pc-code" autocomplete="off"></div>' +
+        '<p class="err" id="pc-err" hidden></p><button class="btn" id="pc-go">Unlock</button><p class="hint">Forgot it? Ask the Operations Director to reset it, then create a new one here.</p>';
+      var attempt = function () {
+        var code = $("pc-code").value.trim(), err = $("pc-err");
+        $("pc-go").disabled = true;
+        // Always check against the current stored code, in case it was changed or reset on another device.
+        freshHash(st).catch(function () { return st.hash; }).then(function (h) {
+          if (!h) { gateKey = ""; renderTherapist(); return; }
+          if (personHash(st.name, code) === h) { lsSet("zoud_sl_auth_" + st.name, h); gateKey = ""; loadAndRender(); }
+          else { err.textContent = "That code is not right."; err.hidden = false; $("pc-go").disabled = false; }
+        });
+      };
+      $("pc-go").addEventListener("click", attempt);
+      $("pc-code").addEventListener("keydown", function (e) { if (e.key === "Enter") attempt(); });
+    }
+  }
+  $("sl-lock").addEventListener("click", function () { var st = staffObj(); if (st) lsSet("zoud_sl_auth_" + st.name, ""); $("sl-cc").innerHTML = ""; cur.editing = null; cur.review = false; renderTherapist(); });
+  $("sl-changecode").addEventListener("click", function () {
+    var st = staffObj(), box = $("sl-cc"); if (!st) return;
+    box.innerHTML = '<div class="editor"><div><label for="pcc-cur">Current code</label><input type="password" id="pcc-cur" autocomplete="off"></div>' +
+      '<div><label for="pcc-new">New code (at least 4 characters)</label><input type="password" id="pcc-new" autocomplete="off"></div>' +
+      '<div><label for="pcc-rep">New code again</label><input type="password" id="pcc-rep" autocomplete="off"></div>' +
+      '<p class="err" id="pcc-err" hidden></p><div class="rowbtns"><button class="btn" id="pcc-save">Save new code</button><button class="btn secondary" id="pcc-cancel">Cancel</button></div></div>';
+    $("pcc-cancel").addEventListener("click", function () { box.innerHTML = ""; });
+    $("pcc-save").addEventListener("click", function () {
+      var c0 = $("pcc-cur").value.trim(), nw = $("pcc-new").value.trim(), rp = $("pcc-rep").value.trim(), err = $("pcc-err"), msg = "";
+      if (personHash(st.name, c0) !== st.hash) msg = "The current code is not right.";
+      else if (nw.length < 4) msg = "The new code needs at least 4 characters.";
+      else if (nw !== rp) msg = "The two new codes do not match.";
+      if (msg) { err.textContent = msg; err.hidden = false; return; }
+      var hash = personHash(st.name, nw); $("pcc-save").disabled = true;
+      atUpdate(TABLES.staffDirectory, st.rid, { sessionLogCodeHash: hash }).then(function () { st.hash = hash; lsSet("zoud_sl_auth_" + st.name, hash); box.innerHTML = ""; toast("Code changed"); },
+        function () { err.textContent = "Could not save. Check the connection and try again."; err.hidden = false; $("pcc-save").disabled = false; });
+    });
+  });
+
   // ================= therapist view =================
   function dayState() {
     if (fromIso(cur.date).getDay() === 5) return "friday";
@@ -539,7 +614,7 @@
     loadAndRender();
   }
   function loadAndRender() {
-    if (!cur.staff) { renderTherapist(); return; }
+    if (!cur.staff || !isAuthed(staffObj())) { renderTherapist(); return; }
     var months = [cur.date.slice(0, 7), addDays(cur.date, -7).slice(0, 7), addDays(cur.date, -28).slice(0, 7)];
     var already = months.every(function (m) { return loadedMonths[cur.staff + "|" + m] || loadedMonths["*|" + m]; });
     if (already) { renderTherapist(); return; }
@@ -569,14 +644,22 @@
     if (odEdit) $("od-edit-text").textContent = "Operations Director: correcting " + cur.staff + "'s days. Every change is recorded under your title and counts straight away.";
     $("sl-staff").disabled = odEdit;
     $("sl-daycard").hidden = !st; $("sl-monthcard").hidden = !st; $("sl-summary").hidden = !st;
-    if (!st) { $("sl-roles").innerHTML = STAFF.length ? '<span class="hint">Choose your name to start. The page remembers it on this phone.</span>' : ""; return; }
+    var authed = isAuthed(st);
+    $("sl-gate").hidden = !st || authed; $("sl-authbtns").hidden = !st || !authed || odEdit;
+    if (!st) { gateKey = ""; $("sl-roles").innerHTML = STAFF.length ? '<span class="hint">Choose your name to start. The page remembers it on this phone.</span>' : ""; return; }
+    if (!authed) {
+      $("sl-daycard").hidden = true; $("sl-monthcard").hidden = true; $("sl-summary").hidden = true; $("sl-cc").innerHTML = "";
+      $("sl-roles").innerHTML = st.roles.map(function (r) { return '<span class="pill role">' + esc(r) + "</span>"; }).join("") + (st.dept ? '<span class="pill wait">' + esc(st.dept) + "</span>" : "");
+      renderGate(st); return;
+    }
+    gateKey = "";
     var d = fromIso(cur.date), state = dayState(), entries = dayEntries(), senior = isSenior(st);
     $("sl-roles").innerHTML = st.roles.map(function (r) { return '<span class="pill role">' + esc(r) + "</span>"; }).join("") +
       (st.dept ? '<span class="pill wait">' + esc(st.dept) + "</span>" : "") +
       '<span class="hint" style="align-self:center">Can log: ' + typesFor(st).map(function (t) { return TYPES[t]; }).join(", ") + "</span>";
     var c = countMonth(cur.staff, cur.date.slice(0, 7));
     $("sl-summary").innerHTML = "<span>" + MON_LONG[d.getMonth()] + " submitted</span>" +
-      "<span><b>" + (c.session + c.cover) + "</b> sessions</span>" + (c.cover ? "<span>incl. <b>" + c.cover + "</b> cover</span>" : "") +
+      "<span><b>" + (c.session + c.cover) + "</b> session" + (c.session + c.cover === 1 ? "" : "s") + "</span>" + (c.cover ? "<span>incl. <b>" + c.cover + "</b> cover</span>" : "") +
       (senior ? "<span><b>" + c.screening + "</b> screening</span><span><b>" + c.initial + "</b> I.S</span>" : "") +
       (c.noshow ? "<span>incl. <b>" + c.noshow + "</b> no-show</span>" : "") +
       (c.pending.length ? '<span class="pill noshow">' + c.pending.length + " day" + (c.pending.length > 1 ? "s" : "") + " not submitted yet</span>" : "");
@@ -753,7 +836,7 @@
       if (msg) { err.textContent = msg; err.hidden = false; return; }
       $(id + "save").disabled = true;
       atUpdate(TABLES.settings, row.rid, { value: simpleHash(nw) }).then(function () {
-        row.value = simpleHash(nw); box.innerHTML = ""; toast("Code changed");
+        row.value = simpleHash(nw); ssSet("zoud_sl_unlock_" + which, row.value); box.innerHTML = ""; toast("Code changed");
       }, function () { err.textContent = "Could not save the new code. Check the connection and try again."; err.hidden = false; $(id + "save").disabled = false; });
     });
   }
@@ -850,7 +933,7 @@
         if (!r.decided) undecided++;
         diffNames.push(r.st.name);
       } else result = r.filled.length < r.keys.length ? '<span class="pill wait">Partly entered</span>' : '<span class="pill ok">Match</span>';
-      return '<tr><td><div class="sname">' + esc(r.st.name) + '</div><div class="ssub">' + esc(r.st.roles.join(", ")) + (r.st.dept ? " · " + esc(r.st.dept) : "") + '</div><button class="btn secondary small" style="margin-top:6px" data-open="' + idx + '">Open days</button></td>' +
+      return '<tr><td><div class="sname">' + esc(r.st.name) + '</div><div class="ssub">' + esc(r.st.roles.join(", ")) + (r.st.dept ? " · " + esc(r.st.dept) : "") + '</div><button class="btn secondary small" style="margin-top:6px" data-open="' + idx + '">Open days</button> <button class="btn secondary small" style="margin-top:6px" data-reset="' + idx + '">Reset code</button></td>' +
         '<td><span class="total">' + r.L.s + '</span><div class="ssub">' + r.c.cover + " cover · " + r.c.noshow + " no-show</div></td><td>" + adm("s") + '</td><td class="total">' + (r.senior ? r.L.sc : "–") + "</td><td>" + adm("sc") + '</td><td class="total">' + (r.senior ? r.L.is : "–") + "</td><td>" + adm("is") + "</td><td>" + result + "</td></tr>";
     }).join("") || '<tr><td colspan="8">No specialists in the Staff Directory yet.</td></tr>';
     $("ad-totals").innerHTML = [["Total sessions", "s"], ["Total screenings", "sc"], ["Total I.S", "is"]]
@@ -871,6 +954,17 @@
         odEdit = true; cur.staff = STAFF[+b.getAttribute("data-open")].name; $("sl-staff").value = cur.staff;
         cur.date = adMonth === TODAY.slice(0, 7) ? TODAY : monthEnd(adMonth); cur.editing = null; cur.review = false;
         show("therapist");
+      });
+    });
+
+    document.querySelectorAll("[data-reset]").forEach(function (b) {
+      var armed = false;
+      b.addEventListener("click", function () {
+        var st = STAFF[+b.getAttribute("data-reset")];
+        if (!armed) { armed = true; b.textContent = "Tap again to reset"; b.classList.add("danger"); setTimeout(function () { armed = false; b.textContent = "Reset code"; b.classList.remove("danger"); }, 4000); return; }
+        b.disabled = true;
+        atUpdate(TABLES.staffDirectory, st.rid, { sessionLogCodeHash: "" }).then(function () { st.hash = ""; lsSet("zoud_sl_auth_" + st.name, ""); toast(st.name + " can now create a new code"); b.textContent = "Reset code"; b.disabled = false; },
+          function () { toast("Could not reset. Check the connection."); b.disabled = false; });
       });
     });
 
