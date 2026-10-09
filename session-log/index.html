@@ -101,6 +101,7 @@
   .slot .what { flex: 1; min-width: 0; display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; }
   .slot .child, .review .child { font-weight: 600; overflow-wrap: anywhere; }
   .slot.empty { border-style: dashed; background: none; }
+  .slot .time.custom { color: var(--accent); }
   .slot.empty .what { color: var(--ink-faint); font-size: 13px; }
   .slot:disabled { cursor: default; }
   .slot.active { border-color: var(--accent); border-style: solid; }
@@ -285,11 +286,21 @@
     try { return new Intl.DateTimeFormat("en-CA", { timeZone: "Africa/Cairo", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date()); }
     catch (e) { return iso(new Date()); }
   }
-  function slotLabel(i) {
-    function f(m) { var h = Math.floor(m / 60), mm = m % 60, h12 = h % 12 || 12; return h12 + ":" + pad(mm); }
-    var s = START_MIN + i * SLOT_MIN;
-    return f(s) + " – " + f(s + SLOT_MIN);
+  // Each slot has a standard start (9:00, 9:45, ...). A specialist whose day runs on a different
+  // clock can move a session up to 30 minutes either way, in 15-minute steps (added 2026-10-10);
+  // the session stays 45 minutes and is still counted as one. Stored as entry.time = "HH:MM".
+  function stdStart(i) { return START_MIN + i * SLOT_MIN; }
+  function toMin(t) { var p = String(t).split(":"); return (+p[0]) * 60 + (+p[1]); }
+  function toHHMM(m) { return pad(Math.floor(m / 60)) + ":" + pad(m % 60); }
+  function entryStart(i, e) { return e && e.time ? toMin(e.time) : stdStart(+i); }
+  function fmt12(m) { var h = Math.floor(m / 60), mm = m % 60, h12 = h % 12 || 12; return h12 + ":" + pad(mm); }
+  function slotLabel(i, e) { var s0 = entryStart(i, e); return fmt12(s0) + " – " + fmt12(s0 + SLOT_MIN); }
+  function timeOptionsFor(i) {
+    var out = [];
+    for (var d = -30; d <= 30; d += 15) { var m = stdStart(i) + d; if (m >= 9 * 60 && m + SLOT_MIN <= 21 * 60) out.push(m); }
+    return out;
   }
+
   function simpleHash(s) { var h = 0; for (var i = 0; i < s.length; i++) { h = ((h << 5) - h + s.charCodeAt(i)) | 0; } return h.toString(36); }
   function toast(msg) { var t = $("toast"); t.textContent = msg; t.classList.add("show"); clearTimeout(toast.t); toast.t = setTimeout(function () { t.classList.remove("show"); }, 2000); }
   function lsGet(k) { try { return localStorage.getItem(k) || ""; } catch (e) { return ""; } }
@@ -637,10 +648,10 @@
         (e.type === "cover" && e.coverFor ? '<span class="hint">for ' + esc(e.coverFor) + "</span>" : "") +
         (e.status === "noshow" ? '<span class="pill noshow">No-show</span>' : "")
       : (editable ? "+ Log this time" : "—");
-    return '<button class="slot' + (e ? "" : " empty") + (active ? " active" : "") + '" data-slot="' + i + '"' + (editable ? "" : " disabled") + '><span class="time">' + slotLabel(i) + '</span><span class="what">' + inner + "</span></button>";
+    return '<button class="slot' + (e ? "" : " empty") + (active ? " active" : "") + '" data-slot="' + i + '"' + (editable ? "" : " disabled") + '><span class="time' + (e && e.time ? " custom" : "") + '">' + slotLabel(i, e) + '</span><span class="what">' + inner + "</span></button>";
   }
   function sugRow(i, e) {
-    return '<div class="slot sug"><span class="time">' + slotLabel(i) + '</span><span class="what"><span class="child">' + esc(e.child) + '</span><span class="pill t-' + esc(e.type) + '">' + (TYPES[e.type] || esc(e.type)) + "</span></span>" +
+    return '<div class="slot sug"><span class="time' + (e.time ? " custom" : "") + '">' + slotLabel(i, e) + '</span><span class="what"><span class="child">' + esc(e.child) + '</span><span class="pill t-' + esc(e.type) + '">' + (TYPES[e.type] || esc(e.type)) + "</span></span>" +
       '<span class="sugbtns"><button class="mini ok" data-sug="' + i + '" data-act="done">✓ Attended</button><button class="mini" data-sug="' + i + '" data-act="noshow">No-show</button><button class="mini" data-sug="' + i + '" data-act="x" aria-label="Not today">✕</button></span></div>';
   }
   function editorHtml(i, existing) {
@@ -652,6 +663,9 @@
     h += '<div><label for="ed-child">Child</label><input type="text" id="ed-child" dir="auto" list="child-list" autocomplete="off" placeholder="Type the child\'s name" value="' + esc(d.child) + '"></div>';
     var rc = recentChildren();
     if (rc.length) h += '<div><span class="lbl">Your children (tap to pick)</span><div class="chip-row">' + rc.map(function (c) { return '<button type="button" class="chip" data-child="' + esc(c) + '" aria-pressed="' + (c === d.child) + '">' + esc(c) + "</button>"; }).join("") + "</div></div>";
+    var tStart = d.time ? toMin(d.time) : stdStart(i);
+    h += '<div><label for="ed-time">Time</label><select id="ed-time">' + timeOptionsFor(i).map(function (m) {
+      return '<option value="' + toHHMM(m) + '"' + (m === tStart ? " selected" : "") + ">" + fmt12(m) + " – " + fmt12(m + SLOT_MIN) + (m === stdStart(i) ? " (usual)" : "") + "</option>"; }).join("") + "</select></div>";
     h += '<div><span class="lbl">Type</span>' + chips("type", typesFor(st).map(function (t) { return [t, TYPES[t]]; }), d.type) + "</div>";
     if (d.type === "cover") h += '<div><label for="ed-cover">Covering for</label><select id="ed-cover"><option value="">Choose the absent therapist</option>' +
       STAFF.filter(function (s) { return s.name !== cur.staff; }).map(function (s) { return '<option value="' + esc(s.name) + '"' + (s.name === d.coverFor ? " selected" : "") + ">" + esc(s.name) + "</option>"; }).join("") + "</select></div>";
@@ -667,7 +681,7 @@
         if (cur.editing === i) { cur.editing = null; renderTherapist(); return; }
         var e = dayEntries()[i];
         cur.editing = i; cur.error = ""; cur.review = false;
-        cur.draft = e ? { child: e.child || "", type: e.type, status: e.status || "done", coverFor: e.coverFor || "" } : { child: "", type: "session", status: "done", coverFor: "" };
+        cur.draft = e ? { child: e.child || "", type: e.type, status: e.status || "done", coverFor: e.coverFor || "", time: e.time || "" } : { child: "", type: "session", status: "done", coverFor: "", time: "" };
         renderTherapist();
       });
     });
@@ -676,13 +690,14 @@
         var i = +b.getAttribute("data-sug"), act = b.getAttribute("data-act"), src = suggestion(i);
         if (!src) return;
         if (act === "x") { var ds = dismissedSet(); ds[i] = 1; lsSet("zoud_sl_dismissed_" + dayKey(), JSON.stringify(ds)); renderTherapist(); return; }
-        var e = { type: src.type, child: src.child, status: act }; if (src.type === "cover") e.coverFor = src.coverFor || "";
+        var e = { type: src.type, child: src.child, status: act }; if (src.type === "cover") e.coverFor = src.coverFor || ""; if (src.time) e.time = src.time;
         setEntry(i, e);
       });
     });
     var child = $("ed-child"); if (!child) return;
     child.addEventListener("input", function () { cur.draft.child = child.value; });
     document.querySelectorAll("[data-child]").forEach(function (b) { b.addEventListener("click", function () { cur.draft.child = b.getAttribute("data-child"); cur.error = ""; renderTherapist(); }); });
+    var tsel = $("ed-time"); if (tsel) tsel.addEventListener("change", function () { cur.draft.time = toMin(tsel.value) === stdStart(cur.editing) ? "" : tsel.value; cur.error = ""; });
     var cov = $("ed-cover"); if (cov) cov.addEventListener("change", function () { cur.draft.coverFor = cov.value; });
     document.querySelectorAll(".editor .chip[data-g]").forEach(function (c) {
       c.addEventListener("click", function () { cur.draft[c.getAttribute("data-g")] = c.getAttribute("data-v"); cur.error = ""; renderTherapist(); });
@@ -694,12 +709,22 @@
       d.child = d.child.trim();
       if (!d.child) cur.error = "Enter the child's name.";
       else if (d.type === "cover" && !d.coverFor) cur.error = "Choose who you covered for.";
-      else cur.error = "";
+      else cur.error = overlapError(cur.editing, d.time);
       if (cur.error) { renderTherapist(); return; }
       var e = { type: d.type, child: d.child, status: d.status };
+      if (d.time && toMin(d.time) !== stdStart(cur.editing)) e.time = d.time;
       if (d.type === "cover") e.coverFor = d.coverFor;
       setEntry(cur.editing, e);
     });
+  }
+  function overlapError(i, time) {
+    var start = time ? toMin(time) : stdStart(i), entries = dayEntries(), clash = "";
+    Object.keys(entries).forEach(function (k) {
+      if (+k === +i || clash) return;
+      var other = entryStart(k, entries[k]);
+      if (Math.abs(other - start) < SLOT_MIN) clash = "That time overlaps your " + slotLabel(k, entries[k]) + " session. Change one of them.";
+    });
+    return clash;
   }
   function setEntry(i, e) {
     var key = dayKey();
@@ -726,7 +751,7 @@
     }
     var h = '<div class="review"><h2>Review ' + dayName + "</h2><ul>" + keys.map(function (i) {
       var e = entries[i];
-      return '<li><span class="time">' + slotLabel(+i) + '</span><span class="child">' + esc(e.child) + '</span><span class="pill t-' + esc(e.type) + '">' + (TYPES[e.type] || esc(e.type)) + "</span>" +
+      return '<li><span class="time">' + slotLabel(+i, e) + '</span><span class="child">' + esc(e.child) + '</span><span class="pill t-' + esc(e.type) + '">' + (TYPES[e.type] || esc(e.type)) + "</span>" +
         (e.type === "cover" && e.coverFor ? '<span class="hint">for ' + esc(e.coverFor) + "</span>" : "") + (e.status === "noshow" ? '<span class="pill noshow">No-show</span>' : "") + "</li>";
     }).join("") + '</ul><p class="hint"><b>' + line + "</b></p>";
     if (sugCount) h += '<p class="notice warn">' + sugCount + " from last week's schedule still unanswered above. They will not be counted unless you tap ✓ or No-show.</p>";
@@ -859,7 +884,7 @@
         var e = rec.entries[i]; if (e.type !== "cover") return;
         var ok = (coverage || []).some(function (cv) { return String(cv.date || "").slice(0, 10) === rec.date && String(cv.originalTherapist || "").trim().toLowerCase() === String(e.coverFor || "").trim().toLowerCase() && cv.coverageStatus !== "cancelled"; });
         var x = fromIso(rec.date);
-        if (!ok) flags.push("<b>" + esc(rec.staffName) + "</b> logged a cover for " + esc(e.coverFor) + " on " + DOW[x.getDay()] + " " + x.getDate() + " " + MON[x.getMonth()] + " (" + slotLabel(+i) + "), with no matching Session Coverage entry.");
+        if (!ok) flags.push("<b>" + esc(rec.staffName) + "</b> logged a cover for " + esc(e.coverFor) + " on " + DOW[x.getDay()] + " " + x.getDate() + " " + MON[x.getMonth()] + " (" + slotLabel(+i, e) + "), with no matching Session Coverage entry.");
       });
     });
     $("ad-flags").innerHTML = flags.length ? flags.map(function (f) { return "<li>" + f + "</li>"; }).join("") : "<li>Nothing needs attention for this month.</li>";
@@ -887,7 +912,7 @@
       var st = staffObj(rec.staffName);
       Object.keys(rec.entries).sort(function (a, b) { return a - b; }).forEach(function (i) {
         var e = rec.entries[i];
-        out.push([rec.date, DOW[fromIso(rec.date).getDay()], slotLabel(+i), rec.staffName, st ? st.dept : "", TYPES[e.type] || e.type, e.child, e.status === "noshow" ? "No-show" : "Attended", e.coverFor || "", rec.submittedAt ? "Yes" : "No", rec.lastEditedBy || ""]);
+        out.push([rec.date, DOW[fromIso(rec.date).getDay()], slotLabel(+i, e), rec.staffName, st ? st.dept : "", TYPES[e.type] || e.type, e.child, e.status === "noshow" ? "No-show" : "Attended", e.coverFor || "", rec.submittedAt ? "Yes" : "No", rec.lastEditedBy || ""]);
       });
     });
     downloadCsv("Zoud-Session-Log-" + adMonth + "-all-sessions.csv", out);
