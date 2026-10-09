@@ -259,7 +259,10 @@
     days: "tblJk7uMHdZrpf0bU",      // SessionLogDays: one record per specialist per day
     monthly: "tblIEKUTS32bPX3GS"    // SessionLogMonthly: no longer used by the page (Admin count tab removed 2026-10-07; Admin counts in Odoo)
   };
-  var SLOT_COUNT = 15, SLOT_MIN = 45, START_MIN = 9 * 60;   // 9:00 → 8:15 pm, as in the paper signing sheet
+  // 9:00 am → 9:45 pm. The paper sheet ended at 8:15 pm; 8:15–9:00 and 9:00–9:45 pm were added 2026-10-10.
+  // New slots are only ever added at the END, so the stored slot numbers (0 = 9:00) never shift.
+  var SLOT_COUNT = 17, SLOT_MIN = 45, START_MIN = 9 * 60;
+  var END_MIN = START_MIN + SLOT_COUNT * SLOT_MIN;
   // Who logs sessions, and which types each title may log (per Haidy, 2026-10-07).
   // Trainee / Technical Coordinator / Technical Director alone do not log.
   var LOGGING_ROLES = ["HOD", "Deputy", "Consultant", "Therapist", "Senior Therapist"];
@@ -297,7 +300,7 @@
   function slotLabel(i, e) { var s0 = entryStart(i, e); return fmt12(s0) + " – " + fmt12(s0 + SLOT_MIN); }
   function timeOptionsFor(i) {
     var out = [];
-    for (var d = -30; d <= 30; d += 15) { var m = stdStart(i) + d; if (m >= 9 * 60 && m + SLOT_MIN <= 21 * 60) out.push(m); }
+    for (var d = -30; d <= 30; d += 15) { var m = stdStart(i) + d; if (m >= START_MIN && m + SLOT_MIN <= END_MIN) out.push(m); }
     return out;
   }
 
