@@ -550,6 +550,33 @@
   .feed-time { font-size: 11.5px; color: var(--ink-faint); margin-top: 1px; }
   .empty-note { font-size: 13px; color: var(--ink-faint); padding: 14px 2px; }
 
+  /* tap-to-open details (added 2026-10-12, per Haidy) — every Recent
+     Activity row, and every row of "Previously logged meetings", opens a
+     full read-only view of that entry underneath itself. */
+  .feed-item { flex-wrap: wrap; }
+  .feed-main { min-width: 0; }
+  .detail-toggle { cursor: pointer; border-radius: 8px; }
+  .detail-toggle:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+  .feed-more { color: var(--accent); font-weight: 600; }
+  .feed-detail {
+    flex-basis: 100%; width: 100%; box-sizing: border-box;
+    background: var(--surface-sunken); border-radius: 10px;
+    padding: 10px 12px; margin-top: 2px; font-size: 13px;
+  }
+  .feed-detail[hidden] { display: none; }
+  .feed-detail .pill { white-space: normal; display: inline-block; }
+  .feed-detail.in-card { margin: 0 0 10px; }
+  .detail-row { display: flex; gap: 10px; padding: 4px 0; align-items: baseline; }
+  .detail-label { flex: 0 0 118px; color: var(--ink-faint); font-size: 11.5px; font-weight: 600; }
+  .detail-val { flex: 1; min-width: 0; overflow-wrap: anywhere; white-space: pre-wrap; }
+  .detail-sub { font-size: 11.5px; font-weight: 700; color: var(--ink-soft); margin: 8px 0 2px; }
+  .detail-att { padding: 6px 0; border-top: 1px solid var(--border); }
+  .detail-att:first-of-type { border-top: none; }
+  .detail-att-name { font-weight: 600; margin-inline-end: 6px; }
+  .detail-att .pill { display: inline-block; margin: 2px 4px 2px 0; }
+  .detail-att-note { color: var(--ink-soft); margin-top: 3px; overflow-wrap: anywhere; }
+  @media (max-width: 420px) { .detail-label { flex-basis: 92px; } }
+
   .whoami {
     display: flex; align-items: center; gap: 8px;
     background: var(--surface);
@@ -1908,7 +1935,13 @@
         date: f.date || "", time: f.time || "", dept: f.dept || "", originalTherapist: f.originalTherapist || "",
         child: f.child || "", reason: f.reason || "", loggedByRole: f.loggedByRole || "", loggedByName: f.loggedByName || "",
         coverageStatus: f.coverageStatus || "", detail: f.detail || "", parentNotified: f.parentNotified || "",
-        parentApproved: f.parentApproved || "", note: f.note || ""
+        parentApproved: f.parentApproved || "", note: f.note || "",
+        // Added 2026-10-12 so the tap-to-open details view can show who
+        // resolved a pending Covered entry — these four were only ever
+        // written by updateSessionCoverage()'s local patch and so were
+        // lost on every reload (same whitelist gap as §27, leaveRequests).
+        approvedAt: f.approvedAt || "", approvedByName: f.approvedByName || "",
+        declinedAt: f.declinedAt || "", declinedByName: f.declinedByName || ""
       });
     }
     if (key === "staffComplaints") {
@@ -2432,10 +2465,14 @@
       select.appendChild(opt);
     }
   }
-  timeOptionsRange(document.getElementById("mt-time"), 0, 23 * 60 + 45);
-  timeOptionsRange(document.getElementById("sc-time"), 0, 23 * 60 + 45);
-  timeOptionsRange(document.getElementById("ob-time"), 0, 23 * 60 + 45);
-  timeOptionsRange(document.getElementById("cx-time"), 0, 23 * 60 + 45);
+  // Narrowed 2026-10-12 (Haidy): the centre's day is 9:00 AM to 9:00 PM, so
+  // these four pickers offer only that window instead of all 24 hours.
+  // Coverage's session-time picker (timeOptions above) was already 9–9.
+  var DAY_START_MIN = 9 * 60, DAY_END_MIN = 21 * 60;
+  timeOptionsRange(document.getElementById("mt-time"), DAY_START_MIN, DAY_END_MIN);
+  timeOptionsRange(document.getElementById("sc-time"), DAY_START_MIN, DAY_END_MIN);
+  timeOptionsRange(document.getElementById("ob-time"), DAY_START_MIN, DAY_END_MIN);
+  timeOptionsRange(document.getElementById("cx-time"), DAY_START_MIN, DAY_END_MIN);
 
   // ================= ESCALATION (Communication Follow-up) =================
   // Widened 2026-09-11 from "Family Communication" to also cover internal
@@ -3116,14 +3153,15 @@
       var count = (m.entries || []).length;
       var when = m.date ? isoToDMY(m.date) + (m.time ? " " + fmtTime12(m.time) : "") : "—";
       html += '<div class="esc-item">' +
-        '<div class="esc-info"><div class="esc-dept">' + escapeHtml(m.type || "Meeting") + ' — ' + when + '</div>' +
-        '<div class="esc-meta">' + count + ' attendee' + (count === 1 ? "" : "s") + (flagged ? ", " + flagged + " flagged" : "") + (m.loggedBy ? ' · Logged by ' + escapeHtml(m.loggedBy) : '') + ' · ' + relTime(m.loggedAt) + '</div></div>' +
+        '<div class="esc-info"' + detailAttrs("meeting", m.id) + '><div class="esc-dept">' + escapeHtml(m.type || "Meeting") + ' — ' + when + '</div>' +
+        '<div class="esc-meta">' + count + ' attendee' + (count === 1 ? "" : "s") + (flagged ? ", " + flagged + " flagged" : "") + (m.loggedBy ? ' · Logged by ' + escapeHtml(m.loggedBy) : '') + ' · ' + relTime(m.loggedAt) + ' · ' + detailLabel("meeting", m.id) + '</div></div>' +
         (flagged ? '<span class="pill warn">' + flagged + ' flagged</span>' : '<span class="pill ok">No flags</span>') +
         '<div class="esc-actions">' +
         '<button class="btn small danger" data-delete-mt="' + m.id + '"></button>' +
-        '</div></div>';
+        '</div></div>' + detailPanel("meeting", m.id, "in-card");
     });
     wrap.innerHTML = html;
+    bindDetailToggles(wrap);
     wrap.querySelectorAll("[data-delete-mt]").forEach(function (b) {
       armConfirm(b, "Delete", "Confirm Delete", function () { deleteEntry("meeting", b.getAttribute("data-delete-mt")); });
     });
@@ -4831,6 +4869,147 @@
     { key: "delayedreport", label: "Delayed Reports" },
     { key: "training", label: "Training Log" }
   ];
+  // ================= TAP-TO-OPEN DETAILS (added 2026-10-12) =================
+  // Per Haidy: tapping any logged entry shows everything that was recorded
+  // for it. Read-only, and only ever rendered inside Manager Access (the
+  // Recent Activity feed and the Meeting Attendance card both live there),
+  // so it exposes nothing that the manager code doesn't already gate.
+  // detailOpen remembers which rows are open so a re-render (which rebuilds
+  // these lists from scratch) doesn't snap them shut.
+  var detailOpen = {};
+  function fmtStamp(iso) {
+    if (!iso) return "";
+    var d = new Date(iso);
+    if (isNaN(d.getTime())) return String(iso);
+    var p = function (n) { return (n < 10 ? "0" : "") + n; };
+    return p(d.getDate()) + "/" + p(d.getMonth() + 1) + "/" + d.getFullYear() + " " + fmtTime12(p(d.getHours()) + ":" + p(d.getMinutes()));
+  }
+  // rawHtml=true only for values this file builds itself (pills); anything
+  // a person typed always goes through escapeHtml.
+  function dRow(label, val, rawHtml) {
+    if (val === null || val === undefined || val === "") return "";
+    val = String(val);
+    return '<div class="detail-row"><span class="detail-label">' + label + '</span><span class="detail-val" dir="auto">' + (rawHtml ? val : escapeHtml(val)) + '</span></div>';
+  }
+  function dWhen(date, time) {
+    return (date ? isoToDMY(date) : "") + (time ? (date ? " " : "") + fmtTime12(time) : "");
+  }
+  function detailHtml(kind, id) {
+    var cfg = DELETE_MAP[kind];
+    var x = cfg ? state[cfg.arr].filter(function (it) { return it.id === id; })[0] : null;
+    if (!x) return '<div class="detail-row"><span class="detail-val">This entry is no longer available.</span></div>';
+    var h = "";
+    if (kind === "meeting") {
+      h += dRow("Meeting type", x.type) + dRow("Date & time", dWhen(x.date, x.time)) + dRow("Logged by", x.loggedBy);
+      var list = x.entries || [];
+      h += '<div class="detail-sub">Attendees (' + list.length + ')</div>';
+      list.forEach(function (a) {
+        var pills = FLAGS.filter(function (f) { return !!a[f.key]; }).map(function (f) { return '<span class="pill warn">' + f.label + '</span>'; }).join("");
+        h += '<div class="detail-att"><span class="detail-att-name" dir="auto">' + escapeHtml(a.name) + '</span>' +
+          (pills || '<span class="pill ok">No flags</span>') +
+          (a.note ? '<div class="detail-att-note" dir="auto">' + escapeHtml(a.note) + '</div>' : '') + '</div>';
+      });
+    } else if (kind === "observation") {
+      var roles = (x.observerRole || "").split(",").filter(Boolean).map(function (r) { return OB_ROLE_LABELS[r] || r; }).join(" + ");
+      h += dRow("Date & time", dWhen(x.date, x.time)) + dRow("Department", x.dept) + dRow("Observed", x.observed) + dRow("Child", x.child) +
+        dRow("Mode", OB_MODE_LABELS[x.observationMode] || x.observationMode) + dRow("Observer", roles);
+      h += '<div class="detail-sub">Rubric</div>';
+      RUBRIC_CRITERIA.forEach(function (c) {
+        var v = (x.rubric || {})[c.key];
+        var lvl = RUBRIC_LEVELS.filter(function (l) { return l.key === v; })[0];
+        var cls = v === "meets" ? "ok" : v === "needs_improvement" ? "warn" : v === "does_not_meet" ? "crit" : "";
+        h += dRow(c.label, lvl ? '<span class="pill ' + cls + '">' + lvl.label + '</span>' : "Not rated", !!lvl);
+      });
+      var beh = BEHAVIOR_ITEMS.filter(function (b) { return !!(x.behavior || {})[b.key]; }).map(function (b) { return '<span class="pill warn">' + b.label + '</span>'; }).join(" ");
+      h += dRow("Compliance", beh || '<span class="pill ok">No issues flagged</span>', true);
+      h += dRow("Training needed", x.training === "yes" ? "Yes" : x.training === "no" ? "No" : x.training) + dRow("Note", x.note);
+    } else if (kind === "spotcheck") {
+      h += dRow("Date & time", dWhen(x.date, x.time)) + dRow("Department", x.dept) + dRow("Therapist", x.therapist) + dRow("Child", x.child) +
+        dRow("Files reviewed", x.filesReviewed) +
+        dRow("Result", x.result === "pass" ? '<span class="pill ok">Pass</span>' : '<span class="pill warn">Needs follow-up</span>', true) +
+        dRow("Reviewed by", x.reviewedBy) + dRow("Note", x.note);
+    } else if (kind === "coverage") {
+      var st = x.coverageStatus === "covered" ? "Covered" : x.coverageStatus === "rescheduled" ? "Rescheduled" : x.coverageStatus === "cancelled" ? "Cancelled" : x.coverageStatus;
+      h += dRow("Date", isoToDMY(x.date)) + dRow("Session time", fmtTimeRange12(x.time)) + dRow("Department", x.dept) + dRow("Child", x.child) +
+        dRow("Absent therapist", x.originalTherapist) + dRow("Reason", x.reason) + dRow("Status", st) +
+        dRow(x.coverageStatus === "covered" ? "Covered by" : "Details", x.detail) +
+        dRow("Parent notified", x.parentNotified === "yes" ? "Yes" : x.parentNotified === "not_yet" ? "Not yet" : x.parentNotified) +
+        dRow("Parent approval", x.parentApproved === "approved" ? "Approved" : x.parentApproved === "waiting" ? "Waiting for answer" : x.parentApproved) +
+        dRow("Approval recorded", x.approvedAt ? fmtStamp(x.approvedAt) + (x.approvedByName ? " — by " + x.approvedByName : "") : "") +
+        dRow("Cancelled (parent)", x.declinedAt ? fmtStamp(x.declinedAt) + (x.declinedByName ? " — by " + x.declinedByName : "") : "") +
+        dRow("Logged by", (x.loggedByName || "") + (x.loggedByRole ? (x.loggedByName ? " (" + x.loggedByRole + ")" : x.loggedByRole) : "")) +
+        dRow("Note", x.note);
+    } else if (kind === "escalation") {
+      var isInternal = x.type === "Internal";
+      h += dRow("Type", x.type || "Family") + dRow("Department", x.dept) + dRow("Owner", (x.owner || "") + (x.ownerRole ? " (" + x.ownerRole + ")" : "")) +
+        dRow(isInternal ? "Name / reference" : "Case reference", x.ref) + dRow("Requested on", isoToDMY(x.requestDate));
+      if (x.status === "resolved") {
+        var dur = new Date(x.resolvedAt) - escBaselineMs(x);
+        h += dRow("Status", '<span class="pill ' + (dur > 3 * DAY ? "crit" : "ok") + '">Resolved — took ' + fmtDuration(dur) + (dur > 3 * DAY ? ", over the 3-day target" : "") + '</span>', true) +
+          dRow("Resolved at", fmtStamp(x.resolvedAt));
+      } else {
+        var el = Date.now() - escBaselineMs(x);
+        h += dRow("Status", '<span class="pill ' + (el > 3 * DAY ? "crit" : "warn") + '">Open — ' + fmtDuration(el) + (el > 3 * DAY ? ", overdue" : " so far") + '</span>', true);
+      }
+    } else if (kind === "complaint") {
+      h += dRow("Incident date", dWhen(x.date, x.time)) + dRow("Filed by", x.filedBy) + dRow("Complainant", x.complainantName) +
+        dRow("Against", (x.againstName || "") + (x.againstDept ? " (" + x.againstDept + ")" : "")) +
+        dRow("Location", x.location) + dRow("Witnesses", x.witnesses) + dRow("Nature", CX_NATURE_LABELS[x.nature] || x.nature) +
+        dRow("Severity", x.severity) + dRow("Details", x.detail) + dRow("Status", CX_STATUS_LABELS[x.status] || x.status) +
+        dRow("Resolution note", x.resolutionNote) +
+        dRow("Camera review", x.cameraReviewRequestedAt ? "Requested " + fmtStamp(x.cameraReviewRequestedAt) : "") +
+        dRow("Camera decision", x.cameraReviewDecision ? x.cameraReviewDecision + (x.cameraReviewDecidedByTitle ? " — by " + x.cameraReviewDecidedByTitle : "") + (x.cameraReviewDecidedAt ? ", " + fmtStamp(x.cameraReviewDecidedAt) : "") : "");
+    } else if (kind === "recognition") {
+      h += dRow("Staff member", x.name) + dRow("Department", x.dept) + dRow("Date", isoToDMY(x.date)) + dRow("Recognized for", x.detail) + dRow("Logged by", x.loggedBy);
+    } else if (kind === "delayedreport") {
+      if (x.noDelayedReports) h += dRow("Entry", "Weekly marker — no delayed reports this week");
+      h += dRow("Date", isoToDMY(x.date)) + dRow("Department", x.dept) + dRow("Child", x.child) + dRow("Responsible", personNameByRid(x.personResponsible)) +
+        dRow("Screening date", isoToDMY(x.screeningDate)) + dRow("Expected delivery", isoToDMY(x.expectedDeliveryDate)) +
+        (x.noDelayedReports ? "" : dRow("Actual delivery", x.actualDeliveryDate ? isoToDMY(x.actualDeliveryDate) : "Not delivered yet")) +
+        dRow("Days delayed", x.daysDelayed === null ? "" : x.daysDelayed) + dRow("Reason", x.reason) + dRow("Logged by", x.loggedBy);
+    } else if (kind === "training") {
+      var names = (x.attendees || []).map(personNameByRid).filter(Boolean);
+      h += dRow("Date", isoToDMY(x.date)) + dRow("Topic", x.topic) + dRow("Department", x.dept) + dRow("Counts as", x.role || x.type) +
+        dRow("Hours", x.hours) + dRow("Trainer", x.trainer ? personNameByRid(x.trainer) : "") +
+        dRow("Attendees (" + (x.attendees || []).length + ")", names.join(", ")) +
+        dRow("Logged by", (x.loggedByName || "") + (x.loggedByRole ? " (" + x.loggedByRole + ")" : "")) + dRow("Note", x.note);
+    }
+    h += dRow("Entered in log", fmtStamp(x.loggedAt));
+    return h;
+  }
+  // Markup helpers shared by every list that offers tap-to-open details.
+  function detailAttrs(kind, id) {
+    return ' role="button" tabindex="0" data-detail-kind="' + kind + '" data-detail-id="' + id + '" aria-expanded="' + (detailOpen[kind + ":" + id] ? "true" : "false") + '"';
+  }
+  function detailLabel(kind, id) {
+    return '<span class="feed-more">' + (detailOpen[kind + ":" + id] ? "Hide details" : "Details") + '</span>';
+  }
+  function detailPanel(kind, id, extraCls) {
+    var open = !!detailOpen[kind + ":" + id];
+    return '<div class="feed-detail' + (extraCls ? " " + extraCls : "") + '" data-detail-for="' + kind + ":" + id + '"' + (open ? "" : " hidden") + '>' + (open ? detailHtml(kind, id) : "") + '</div>';
+  }
+  function bindDetailToggles(root) {
+    root.querySelectorAll("[data-detail-kind]").forEach(function (t) {
+      var kind = t.getAttribute("data-detail-kind"), id = t.getAttribute("data-detail-id"), key = kind + ":" + id;
+      t.classList.add("detail-toggle");
+      function toggle() {
+        var panel = root.querySelector('[data-detail-for="' + key + '"]');
+        if (!panel) return;
+        var open = !detailOpen[key];
+        if (open) detailOpen[key] = true; else delete detailOpen[key];
+        if (open) panel.innerHTML = detailHtml(kind, id);
+        panel.hidden = !open;
+        t.setAttribute("aria-expanded", open ? "true" : "false");
+        var more = t.querySelector(".feed-more");
+        if (more) more.textContent = open ? "Hide details" : "Details";
+      }
+      t.addEventListener("click", toggle);
+      t.addEventListener("keydown", function (e) {
+        if (e.key === "Enter" || e.key === " ") { e.preventDefault(); toggle(); }
+      });
+    });
+  }
+
   function renderFeed() {
     var items = [];
     state.escalations.forEach(function (e) {
@@ -4972,9 +5151,11 @@
     list.innerHTML = shown.map(function (it) {
       var iconCls = it.kind === "recognition" ? "feed-icon icon-recognition" : "feed-icon";
       return '<li class="feed-item"><span class="' + iconCls + '">' + iconFor(it.kind) + '</span>' +
-        '<span class="feed-main"><div class="feed-text">' + it.text + '</div><div class="feed-time">' + relTime(it.at) + '</div></span>' +
-        '<button class="feed-delete" data-del-kind="' + it.kind + '" data-del-id="' + it.id + '"></button></li>';
+        '<span class="feed-main"' + detailAttrs(it.kind, it.id) + '><div class="feed-text">' + it.text + '</div><div class="feed-time">' + relTime(it.at) + ' · ' + detailLabel(it.kind, it.id) + '</div></span>' +
+        '<button class="feed-delete" data-del-kind="' + it.kind + '" data-del-id="' + it.id + '"></button>' +
+        detailPanel(it.kind, it.id) + '</li>';
     }).join("");
+    bindDetailToggles(list);
     list.querySelectorAll("[data-del-kind]").forEach(function (b) {
       armConfirm(b, "Delete", "Confirm?", function () { deleteEntry(b.getAttribute("data-del-kind"), b.getAttribute("data-del-id")); });
     });
