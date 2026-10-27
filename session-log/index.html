@@ -124,6 +124,21 @@
   .mlist { display: flex; flex-direction: column; }
   .mrow { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 10px; width: 100%; text-align: start; background: none; border: none; border-bottom: 1px solid var(--border); padding: 9px 2px; cursor: pointer; font-size: 13px; }
   .mrow:last-child { border-bottom: none; }
+  /* Tap-a-day brief (added 2026-10-27, per Haidy): each month row now opens a short summary of
+     that day under itself; "Open this day" inside it does what tapping the row used to do. */
+  .mitem { border-bottom: 1px solid var(--border); }
+  .mitem:last-child { border-bottom: none; }
+  .mitem .mrow { border-bottom: none; }
+  .mrow[aria-expanded="true"] .md { color: var(--accent); }
+  .mbrief { background: var(--surface-sunken); border-radius: var(--radius-sm); padding: 10px 12px; margin: 0 0 10px; display: flex; flex-direction: column; gap: 8px; }
+  .mbrief[hidden] { display: none; }
+  .mbrief ul { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
+  .mbrief li { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; padding: 6px 0; border-bottom: 1px solid var(--border); }
+  .mbrief li:last-child { border-bottom: none; }
+  .mbrief .time { width: 92px; flex-shrink: 0; font-size: 12.5px; font-weight: 600; color: var(--ink-soft); font-variant-numeric: tabular-nums; }
+  .mbrief .child { font-weight: 600; overflow-wrap: anywhere; }
+  .mbrief .time.custom { color: var(--accent); }
+  .mbrief .btn { align-self: flex-start; }
   .mrow .md { width: 78px; flex-shrink: 0; font-weight: 700; font-variant-numeric: tabular-nums; }
   .mrow .mc { flex: 1; min-width: 120px; color: var(--ink-soft); }
   .mrow[aria-current="true"] .md { color: var(--accent); }
@@ -767,6 +782,34 @@
       renderTherapist();
     });
   }
+  // Which month row has its brief open ("" = none). Kept across re-renders.
+  var monthOpen = "";
+  function fmtCairoStamp(isoStr) {
+    if (!isoStr) return "";
+    var d = new Date(isoStr); if (isNaN(d.getTime())) return "";
+    try {
+      var parts = new Intl.DateTimeFormat("en-GB", { timeZone: "Africa/Cairo", day: "numeric", month: "short", hour: "numeric", minute: "2-digit", hour12: true }).format(d);
+      return parts.replace(",", "");
+    } catch (e) { return d.toLocaleString(); }
+  }
+  function dayBriefHtml(k, dt, senior) {
+    var entries = dayEntries(k), keys = Object.keys(entries).sort(function (a, b) { return entryStart(a, entries[a]) - entryStart(b, entries[b]); });
+    var rec = dayRecs[k], h = "";
+    if (!keys.length) h += '<p class="hint" style="margin:0;">Nothing logged on this day.</p>';
+    else {
+      h += "<ul>" + keys.map(function (i) {
+        var e = entries[i];
+        return '<li><span class="time' + (e.time ? " custom" : "") + '">' + slotLabel(+i, e) + '</span><span class="child" dir="auto">' + esc(e.child) + '</span><span class="pill t-' + esc(e.type) + '">' + (TYPES[e.type] || esc(e.type)) + "</span>" +
+          (e.type === "cover" && e.coverFor ? '<span class="hint">for ' + esc(e.coverFor) + "</span>" : "") + (e.status === "noshow" ? '<span class="pill noshow">No-show</span>' : "") + "</li>";
+      }).join("") + "</ul>";
+      h += '<p class="hint" style="margin:0;"><b>' + countLine(countEntries(entries), senior) + "</b></p>";
+      var st = rec && rec.submittedAt ? "Submitted " + fmtCairoStamp(rec.submittedAt) : "Not submitted yet, so not counted";
+      if (rec && rec.lastEditedBy && rec.lastEditedBy !== rec.staffName) st += " · last edited by " + esc(rec.lastEditedBy);
+      h += '<p class="hint" style="margin:0;">' + st + "</p>";
+    }
+    h += '<button class="btn secondary" data-goto="' + dt + '">Open this day</button>';
+    return h;
+  }
   function renderMonth(d) {
     var month = cur.date.slice(0, 7), senior = isSenior(staffObj()), c = countMonth(cur.staff, month), rows = "";
     var last = month === TODAY.slice(0, 7) ? TODAY : monthEnd(month);
@@ -774,12 +817,30 @@
       var x = fromIso(dt); if (x.getDay() === 5) continue;
       var k = cur.staff + "|" + dt, has = hasEntries(k);
       var pill = !has ? '<span class="pill wait">Nothing logged</span>' : (isSubmitted(k) ? '<span class="pill ok">Submitted</span>' : '<span class="pill noshow">Not submitted</span>');
-      rows += '<button class="mrow" data-goto="' + dt + '" aria-current="' + (dt === cur.date) + '"><span class="md">' + DOW[x.getDay()] + " " + x.getDate() + " " + MON[x.getMonth()] + '</span><span class="mc">' + (has ? countLine(countEntries(dayEntries(k)), senior) : "") + "</span>" + pill + "</button>";
+      var open = monthOpen === dt;
+      rows += '<div class="mitem"><button class="mrow" data-brief="' + dt + '" aria-expanded="' + open + '" aria-current="' + (dt === cur.date) + '"><span class="md">' + DOW[x.getDay()] + " " + x.getDate() + " " + MON[x.getMonth()] + '</span><span class="mc">' + (has ? countLine(countEntries(dayEntries(k)), senior) : "") + "</span>" + pill + "</button>" +
+        '<div class="mbrief" data-brief-for="' + dt + '"' + (open ? "" : " hidden") + ">" + (open ? dayBriefHtml(k, dt, senior) : "") + "</div></div>";
     }
     $("sl-month-title").textContent = (odEdit ? cur.staff + " · " : "My ") + MON_LONG[d.getMonth()];
-    $("sl-month-total").textContent = "Submitted so far: " + countLine(c, senior) + ". Tap a day to open it.";
+    $("sl-month-total").textContent = "Submitted so far: " + countLine(c, senior) + ". Tap a day to see a summary.";
     $("sl-month").innerHTML = cur.loading ? "" : rows;
-    document.querySelectorAll("[data-goto]").forEach(function (b) { b.addEventListener("click", function () { goTo(b.getAttribute("data-goto")); $("sl-daylabel").scrollIntoView({ block: "center" }); }); });
+    function bindGoto(scope) {
+      scope.querySelectorAll("[data-goto]").forEach(function (b) { b.addEventListener("click", function () { goTo(b.getAttribute("data-goto")); $("sl-daylabel").scrollIntoView({ block: "center" }); }); });
+    }
+    bindGoto($("sl-month"));
+    document.querySelectorAll("#sl-month [data-brief]").forEach(function (b) {
+      b.addEventListener("click", function () {
+        var dt = b.getAttribute("data-brief"), wasOpen = monthOpen === dt;
+        document.querySelectorAll("#sl-month .mbrief").forEach(function (p) { p.hidden = true; p.innerHTML = ""; });
+        document.querySelectorAll("#sl-month [data-brief]").forEach(function (r) { r.setAttribute("aria-expanded", "false"); });
+        monthOpen = wasOpen ? "" : dt;
+        if (wasOpen) return;
+        var panel = document.querySelector('#sl-month [data-brief-for="' + dt + '"]');
+        panel.innerHTML = dayBriefHtml(cur.staff + "|" + dt, dt, isSenior(staffObj()));
+        panel.hidden = false; b.setAttribute("aria-expanded", "true");
+        bindGoto(panel);
+      });
+    });
   }
 
   // ================= gates and codes =================
