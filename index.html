@@ -401,6 +401,7 @@
     margin-top: 16px;
   }
   .btn:active { background: var(--accent-strong); }
+  .btn:disabled, .btn.is-busy { opacity: 0.65; cursor: wait; }
   .btn.secondary {
     background: var(--surface-sunken);
     color: var(--ink);
@@ -1837,10 +1838,51 @@
     return page(null);
   }
 
+  // ---- Save-button lock (2026-10-28) ----
+  // Duplicates were being created by a second tap on Save while the first
+  // save was still on its way to Airtable. Any "…-submit"/"…-add" button
+  // that starts a save is now disabled and reads "جاري الحفظ…" until the save
+  // finishes (success or failure). Works for every card: the click is
+  // remembered for the same tick, and atCreate/atCreateMany lock that button.
+  var pendingSaveBtn = null;
+  document.addEventListener("click", function (e) {
+    var b = e.target && e.target.closest ? e.target.closest("button.btn") : null;
+    if (!b || !b.id || b.id === "mt-add" || !/-(submit|add)$/.test(b.id)) return;
+    pendingSaveBtn = b;
+    setTimeout(function () { if (pendingSaveBtn === b) pendingSaveBtn = null; }, 0);
+  }, true);
+  function lockSaveBtn(b) {
+    if (!b) return function () {};
+    b._lockCount = (b._lockCount || 0) + 1;
+    if (b._lockCount === 1) {
+      b._savedLabel = b.textContent;
+      b.disabled = true;
+      b.classList.add("is-busy");
+      b.textContent = "جاري الحفظ…";
+    }
+    var released = false;
+    return function () {
+      if (released) return;
+      released = true;
+      b._lockCount = Math.max(0, b._lockCount - 1);
+      if (b._lockCount === 0) {
+        b.disabled = false;
+        b.classList.remove("is-busy");
+        b.textContent = b._savedLabel;
+      }
+    };
+  }
+  function withAutoLock(promise) {
+    var b = pendingSaveBtn;
+    if (!b) return promise;
+    var unlock = lockSaveBtn(b);
+    return promise.then(function (r) { unlock(); return r; }, function (e) { unlock(); throw e; });
+  }
+
   function atCreate(tableId, fields) {
-    return atRequest("POST", tableId, { body: { records: [{ fields: fields }] } }).then(function (data) {
+    return withAutoLock(atRequest("POST", tableId, { body: { records: [{ fields: fields }] } }).then(function (data) {
       return data.records[0];
-    });
+    }));
   }
   function atUpdate(tableId, recordId, fields) {
     return atRequest("PATCH", tableId, { path: "/" + recordId, body: { fields: fields } });
@@ -3349,7 +3391,32 @@
       observed: entry.observed, child: entry.child, observationMode: entry.observationMode, rubricJson: JSON.stringify(entry.rubric), behaviorJson: JSON.stringify(entry.behavior),
       training: entry.training, note: entry.note, loggedAt: entry.loggedAt
     });
-    atCreate(TABLES.observations, fields).then(function (rec) {
+    // Duplicate rule (2026-10-28, Haidy): the same therapist, on the same date
+    // and session time, logged by the same observer role (e.g. HOD or TD), is
+    // the same observation — refuse to save it again. Checked against what's
+    // loaded on this page first, then against Airtable itself (so a save from
+    // another phone since this page loaded is caught too).
+    function normName(s) { return String(s || "").trim().replace(/\s+/g, " ").toLowerCase(); }
+    function isDupOf(o) {
+      if (normName(o.observed) !== normName(observed) || o.date !== obsDate || o.time !== obsTime) return false;
+      var theirs = String(o.observerRole || "").split(",").map(function (r) { return r.trim(); });
+      return obRoles.some(function (r) { return theirs.indexOf(r) !== -1; });
+    }
+    function showDupError() {
+      err.textContent = "Not saved: this observation is already logged — " + observed + ", " +
+        isoToDMY(obsDate) + " at " + fmtTime12(obsTime) + ", by the same observer role.";
+      err.style.display = "block";
+    }
+    if (state.observations.some(isDupOf)) { showDupError(); return; }
+    var obBtn = document.getElementById("ob-submit");
+    var unlockOb = lockSaveBtn(obBtn);
+    pendingSaveBtn = null;
+    var dupFormula = "AND({date}='" + obsDate + "',{time}='" + obsTime + "')";
+    atRequest("GET", TABLES.observations, { query: "pageSize=100&filterByFormula=" + encodeURIComponent(dupFormula) }).then(function (data) {
+      var existing = (data.records || []).map(function (r) { return recordToEntry("observations", r); });
+      if (existing.some(isDupOf)) { unlockOb(); showDupError(); return; }
+      return atCreate(TABLES.observations, fields).then(function (rec) {
+      unlockOb();
       entry._rid = rec.id;
       state.observations.unshift(entry);
       document.getElementById("ob-observed").value = "";
@@ -3366,7 +3433,8 @@
       document.getElementById("ob-time").value = "";
       render();
       obConfirm.show();
-    }).catch(handleSaveFailure);
+      });
+    }).catch(function (e) { unlockOb(); handleSaveFailure(e); });
   });
 
   // ================= SPOT-CHECK =================
@@ -3684,13 +3752,13 @@
     var chunks = [];
     for (var i = 0; i < fieldsList.length; i += 10) chunks.push(fieldsList.slice(i, i + 10));
     var created = [];
-    return chunks.reduce(function (p, chunk) {
+    return withAutoLock(chunks.reduce(function (p, chunk) {
       return p.then(function () {
         return atRequest("POST", tableId, { body: { records: chunk.map(function (f) { return { fields: f }; }) } });
       }).then(function (data) {
         created = created.concat(data.records);
       });
-    }, Promise.resolve()).then(function () { return created; });
+    }, Promise.resolve()).then(function () { return created; }));
   }
 
   var covConfirm = makeSubmitConfirm("cov-confirm");
