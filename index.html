@@ -2010,7 +2010,7 @@
       // every row here is explicitly created with active:true and only
       // ever explicitly PATCHed to active:false on deactivation — so
       // "not === true" correctly means inactive, never an ambiguous case.
-      return Object.assign(base, { name: f.name || "", email: f.email || "", hireDate: f.hireDate || "", roles: f.roles || [], department: f.department || "", active: f.active === true });
+      return Object.assign(base, { name: f.name || "", email: f.email || "", hireDate: f.hireDate || "", roles: f.roles || [], department: f.department || "", active: f.active === true, payType: f.payType || "" });
     }
     if (key === "leaveRequests") {
       return Object.assign(base, {
@@ -4376,6 +4376,16 @@
         '</button>' +
         '<input type="date" class="sd-hiredate-native" tabindex="-1" aria-hidden="true">' +
         '</div>';
+      // Pay type (added 2026-10-28, per Haidy): "Fixed salary" staff are not
+      // paid per session, so the Session Log page hides them. Empty = per session.
+      var SESSION_LOG_TITLES = ["HOD", "Deputy", "Consultant", "Therapist", "Senior Therapist"];
+      var payHtml = roles.some(function (r) { return SESSION_LOG_TITLES.indexOf(r) !== -1; })
+        ? '<p class="hint" style="margin:6px 0 0;">Pay (Session Log):</p>' +
+          '<select class="sd-pay-select" data-sd-payfor="' + p.id + '">' +
+          '<option value="Per session"' + (p.payType === "Fixed salary" ? "" : " selected") + '>Per session — logs in Session Log</option>' +
+          '<option value="Fixed salary"' + (p.payType === "Fixed salary" ? " selected" : "") + '>Fixed salary — hidden from Session Log</option>' +
+          '</select>'
+        : "";
       html += '<div class="esc-item">' +
         '<div class="esc-info"><div class="esc-dept">' + escapeHtml(p.name) + (p.active ? "" : " (inactive)") + '</div>' +
         '<div class="esc-meta">' + escapeHtml(p.email) + '</div>' +
@@ -4383,7 +4393,7 @@
         hireDateHtml +
         '<p class="hint" style="margin:6px 0 0;">Title(s) — tap to add or remove:</p>' +
         roleChipsHtml +
-        deptSelectHtml + '</div>' +
+        deptSelectHtml + payHtml + '</div>' +
         '<div class="esc-actions">' +
         (p.active
           ? '<button class="btn small secondary" data-sd-deactivate="' + p.id + '">Deactivate</button>'
@@ -4439,6 +4449,9 @@
     });
     wrap.querySelectorAll("[data-sd-deptfor]").forEach(function (sel) {
       sel.addEventListener("change", function () { updateStaffDirectory(sel.getAttribute("data-sd-deptfor"), { department: sel.value }); });
+    });
+    wrap.querySelectorAll("[data-sd-payfor]").forEach(function (sel) {
+      sel.addEventListener("change", function () { updateStaffDirectory(sel.getAttribute("data-sd-payfor"), { payType: sel.value }); });
     });
   }
 

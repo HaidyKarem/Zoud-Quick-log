@@ -358,6 +358,7 @@
   // ================= state =================
   var TODAY = cairoToday();
   var STAFF = [];              // eligible, active: { name, roles[], dept }
+  var STAFF_ALL = [];          // same, including fixed-salary staff (used only for "Covering for")
   var settings = {};           // key -> { rid, value }
   var dayRecs = {};            // "name|date" -> { rid, staffName, date, entries{}, submittedAt, updatedAt, lastEditedBy }
   var loadedMonths = {};       // "name|YYYY-MM" or "*|YYYY-MM" -> true once fetched
@@ -411,9 +412,14 @@
   }
   function boot() {
     var staffP = atList(TABLES.staffDirectory).then(function (recs) {
-      STAFF = recs.map(function (r) { var f = r.fields || {}; return { rid: r.id, name: f.name || "", roles: f.roles || [], dept: f.department || "", active: f.active === true, hash: f.sessionLogCodeHash || "" }; })
+      STAFF_ALL = recs.map(function (r) { var f = r.fields || {}; return { rid: r.id, name: f.name || "", roles: f.roles || [], dept: f.department || "", active: f.active === true, hash: f.sessionLogCodeHash || "", fixedSalary: f.payType === "Fixed salary" }; })
         .filter(function (p) { return p.active && p.name && p.roles.some(function (r) { return LOGGING_ROLES.indexOf(r) >= 0; }); })
         .sort(function (a, b) { return a.name.localeCompare(b.name); });
+      // 2026-10-28: Staff Directory "payType" = "Fixed salary" means not paid per
+      // session — they don't log here (not in "Your name", not in the Operations
+      // Director tab, no flags). They stay in STAFF_ALL so a colleague who covers
+      // their session can still pick them under "Covering for".
+      STAFF = STAFF_ALL.filter(function (p) { return !p.fixedSalary; });
     });
     var setP = atList(TABLES.settings).then(function (recs) { recs.forEach(function (r) { var f = r.fields || {}; if (f.key) settings[f.key] = { rid: r.id, value: f.value || "" }; }); });
     // Non-critical: without it the child field is plain free text.
@@ -686,7 +692,7 @@
       return '<option value="' + toHHMM(m) + '"' + (m === tStart ? " selected" : "") + ">" + fmt12(m) + " – " + fmt12(m + SLOT_MIN) + (m === stdStart(i) ? " (usual)" : "") + "</option>"; }).join("") + "</select></div>";
     h += '<div><span class="lbl">Type</span>' + chips("type", typesFor(st).map(function (t) { return [t, TYPES[t]]; }), d.type) + "</div>";
     if (d.type === "cover") h += '<div><label for="ed-cover">Covering for</label><select id="ed-cover"><option value="">Choose the absent therapist</option>' +
-      STAFF.filter(function (s) { return s.name !== cur.staff; }).map(function (s) { return '<option value="' + esc(s.name) + '"' + (s.name === d.coverFor ? " selected" : "") + ">" + esc(s.name) + "</option>"; }).join("") + "</select></div>";
+      STAFF_ALL.filter(function (s) { return s.name !== cur.staff; }).map(function (s) { return '<option value="' + esc(s.name) + '"' + (s.name === d.coverFor ? " selected" : "") + ">" + esc(s.name) + "</option>"; }).join("") + "</select></div>";
     h += '<div><span class="lbl">Attendance</span>' + chips("status", [["done", "Attended"], ["noshow", "No-show (same-day cancel or absent)"]], d.status) + "</div>";
     if (cur.error) h += '<p class="err">' + esc(cur.error) + "</p>";
     h += '<div class="rowbtns"><button class="btn" id="ed-save">Save</button><button class="btn secondary" id="ed-cancel">Cancel</button>' + (existing ? '<button class="btn danger" id="ed-remove">Remove</button>' : "") + "</div></div>";
