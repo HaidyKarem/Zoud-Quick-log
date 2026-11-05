@@ -412,6 +412,21 @@
   .hint { font-size: 12px; color: var(--ink-faint); margin-top: 6px; }
   .field-error { font-size: 12px; color: var(--critical); margin-top: 6px; display: none; }
   .wish-confirm { display: none; text-align: right; direction: rtl; color: var(--wish-confirm-ink); background: var(--wish-confirm-bg); font-weight: 700; font-size: 13.5px; line-height: 1.5; padding: 10px 14px; border-radius: var(--radius-sm); margin: 10px 0 0; }
+  /* Monthly observation counter (2026-11-06) */
+  .ob-progress { background: var(--surface-sunken); border-radius: var(--radius-sm); padding: 12px 14px; margin: 12px 0 4px; }
+  .ob-progress .obp-block + .obp-block { border-top: 1px solid var(--border); margin-top: 10px; padding-top: 10px; }
+  .ob-progress .obp-head { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
+  .ob-progress .obp-label { font-size: 13px; color: var(--ink-faint); }
+  .ob-progress .obp-num { font-size: 20px; font-weight: 700; }
+  .ob-progress .obp-num small { font-size: 13px; font-weight: 400; color: var(--ink-faint); }
+  .ob-progress .obp-bar { height: 6px; background: var(--border); border-radius: 3px; margin: 8px 0 6px; overflow: hidden; }
+  .ob-progress .obp-bar span { display: block; height: 100%; background: var(--accent); border-radius: 3px; }
+  .ob-progress .obp-bar span.done { background: var(--good); }
+  .ob-progress .obp-sub { font-size: 12px; color: var(--ink-faint); }
+  .ob-progress details { margin-top: 8px; font-size: 12.5px; }
+  .ob-progress summary { cursor: pointer; color: var(--accent); }
+  .ob-progress ul { margin: 6px 0 0; padding-left: 18px; }
+  .ob-progress .obp-missing { margin-top: 6px; color: var(--warn); font-size: 12.5px; }
   .submit-confirm { display: none; color: var(--good); background: var(--good-soft); font-weight: 700; font-size: 13.5px; line-height: 1.5; padding: 10px 14px; border-radius: var(--radius-sm); margin: 10px 0 0; }
   .notice-purple {
     background: var(--brand-purple-soft);
@@ -1326,7 +1341,7 @@
       <select id="ob-dept"></select>
 
       <label>Observed by</label>
-      <p class="hint" style="margin-top:0;">Tap all roles this counts for — if the same person holds more than one title (e.g. Technical Director and HOD), tap both so one visit counts for every quota it should.</p>
+      <p class="hint" style="margin-top:0;">Tap only the titles you hold for this department. If you are Technical Director and also HOD of this department, tap both. In any other department, tap Technical Director only — tapping Head of Department there counts it for that department's HOD.</p>
       <div class="chip-row" id="ob-role">
         <button type="button" class="chip" data-val="hod">Head of Department</button>
         <button type="button" class="chip" data-val="deputy">Deputy Head</button>
@@ -1334,6 +1349,7 @@
         <button type="button" class="chip" data-val="technical_coordinator">Technical Coordinator</button>
         <button type="button" class="chip" data-val="day_care_coordinator">Day Care Coordinator</button>
       </div>
+      <div class="ob-progress" id="ob-progress" style="display:none;" aria-live="polite"></div>
 
       <label for="ob-observed">Therapist observed</label>
       <input type="text" dir="auto" id="ob-observed" list="names-list" placeholder="Therapist's name">
@@ -3343,6 +3359,7 @@
   document.querySelectorAll("#ob-role .chip").forEach(function (c) {
     c.addEventListener("click", function () {
       c.setAttribute("aria-pressed", c.getAttribute("aria-pressed") === "true" ? "false" : "true");
+      renderObProgress();
     });
   });
   function getObRoles() {
@@ -3353,6 +3370,105 @@
     document.querySelectorAll("#ob-role .chip").forEach(function (c) { c.setAttribute("aria-pressed", "false"); });
   }
 
+
+  // ===== Monthly observation counter (2026-11-06, Haidy) =====
+  // HODs/Deputies forget how many observations they've logged this month.
+  // Shown inside this card once a department + HOD and/or Deputy role are
+  // picked. Counts EXACTLY like the KPI scorecard: Observations whose
+  // observerRole list contains that role, in that department, in the
+  // calendar month of the observation date being entered. Targets: HOD 8,
+  // Deputy 4. Counseling is excluded (confidential, no observations by
+  // design). Open to everyone, no code (Haidy's choice — it's counts only).
+  // "Not observed yet" = active Therapist / Senior Therapist in that
+  // department with no observation by that role this month.
+  var OB_TARGETS = { hod: 8, deputy: 4 };
+  function obMonthKey() {
+    var d = parseDMY(document.getElementById("ob-date").value);
+    if (d) return d.slice(0, 7);
+    var n = new Date();
+    return n.getFullYear() + "-" + String(n.getMonth() + 1).padStart(2, "0");
+  }
+  function obHasRole(o, role) {
+    return String(o.observerRole || "").split(",").map(function (r) { return r.trim(); }).indexOf(role) !== -1;
+  }
+  function obNorm(s) { return String(s || "").trim().replace(/\s+/g, " ").toLowerCase(); }
+  function obMonthList(dept, role, monthKey) {
+    return state.observations.filter(function (o) {
+      return o.dept === dept && String(o.date || "").slice(0, 7) === monthKey && obHasRole(o, role);
+    }).sort(function (a, b) { return String(a.date + a.time).localeCompare(String(b.date + b.time)); });
+  }
+  function obDeptTherapists(dept) {
+    return state.staffDirectory.filter(function (p) {
+      if (!p.active) return false;
+      var d = Array.isArray(p.department) ? p.department : [p.department];
+      var r = Array.isArray(p.roles) ? p.roles : [p.roles];
+      return d.indexOf(dept) !== -1 && (r.indexOf("Therapist") !== -1 || r.indexOf("Senior Therapist") !== -1);
+    }).map(function (p) { return p.name; }).sort(function (a, b) { return a.localeCompare(b); });
+  }
+  function obEsc(t) { return String(t == null ? "" : t).replace(/[&<>"]/g, function (c) { return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]; }); }
+  // Which counters to show: HOD/Deputy chip -> that role in the picked
+  // department (not Counseling). Technical Director alone shows no counter
+  // (Haidy 2026-11-06: TD alone = TD quota only, any department; in her own
+  // department she taps TD + HOD together).
+  function obBlocks(dept, roles) {
+    var out = [];
+    function add(d, r) { if (!out.some(function (b) { return b.dept === d && b.role === r; })) out.push({ dept: d, role: r }); }
+    if (dept && dept !== "Counseling") roles.forEach(function (r) { if (OB_TARGETS[r]) add(dept, r); });
+    return out;
+  }
+  function obBlockLabel(b) {
+    return b.role === "deputy" ? "Deputy" : "HOD";
+  }
+  function renderObProgress() {
+    var box = document.getElementById("ob-progress");
+    if (!box) return;
+    var blocks = obBlocks(document.getElementById("ob-dept").value, getObRoles());
+    if (!blocks.length) { box.style.display = "none"; box.innerHTML = ""; return; }
+    var mk = obMonthKey();
+    var y = +mk.slice(0, 4), m = +mk.slice(5, 7);
+    var monthName = new Date(y, m - 1, 1).toLocaleString("en-GB", { month: "long" });
+    var now = new Date();
+    var isCurrent = now.getFullYear() === y && now.getMonth() + 1 === m;
+    var daysLeft = isCurrent ? (new Date(y, m, 0).getDate() - now.getDate()) : null;
+    var html = "";
+    blocks.forEach(function (blk) {
+      var dept = blk.dept, role = blk.role;
+      var therapists = obDeptTherapists(dept);
+      var list = obMonthList(dept, role, mk);
+      var target = OB_TARGETS[role], n = list.length;
+      var pct = Math.min(100, Math.round(n / target * 100));
+      var left = Math.max(0, target - n);
+      var sub = left ? (left + " more to reach the monthly target") : "Monthly target reached";
+      if (daysLeft !== null) sub += " · " + daysLeft + (daysLeft === 1 ? " day" : " days") + " left";
+      var seen = list.map(function (o) { return obNorm(o.observed); });
+      var missing = therapists.filter(function (t) { return seen.indexOf(obNorm(t)) === -1; });
+      html += '<div class="obp-block">' +
+        '<div class="obp-head"><span class="obp-label">' + obEsc(dept) + " · " + obEsc(obBlockLabel(blk)) + " · " + obEsc(monthName) + '</span>' +
+        '<span class="obp-num">' + n + ' <small>/ ' + target + '</small></span></div>' +
+        '<div class="obp-bar"><span class="' + (left ? "" : "done") + '" style="width:' + pct + '%"></span></div>' +
+        '<div class="obp-sub">' + sub + '</div>';
+      if (n) {
+        html += '<details><summary>This month\'s observations (' + n + ')</summary><ul>' +
+          list.map(function (o) {
+            return "<li>" + obEsc(isoToDMY(o.date)) + " · " + obEsc(o.observed) +
+              (o.observationMode ? " · " + obEsc(OB_MODE_LABELS[o.observationMode] || o.observationMode) : "") + "</li>";
+          }).join("") + "</ul></details>";
+      }
+      if (therapists.length) {
+        html += missing.length
+          ? '<div class="obp-missing">Not observed yet this month: ' + missing.map(obEsc).join(", ") + "</div>"
+          : '<div class="obp-sub" style="margin-top:6px;">Every therapist in the department observed this month</div>';
+      }
+      html += "</div>";
+    });
+    box.innerHTML = html;
+    box.style.display = "block";
+  }
+  document.getElementById("ob-dept").addEventListener("change", renderObProgress);
+  ["input", "change"].forEach(function (ev) {
+    document.getElementById("ob-date").addEventListener(ev, renderObProgress);
+  });
+  document.getElementById("ob-date-native").addEventListener("change", function () { setTimeout(renderObProgress, 0); });
   var obConfirm = makeSubmitConfirm("ob-confirm");
   document.getElementById("ob-submit").addEventListener("click", function () {
     obConfirm.hide();
@@ -3432,7 +3548,16 @@
       obDateInput.value = formatDateDMY(new Date());
       document.getElementById("ob-time").value = "";
       render();
+      var obCountMsg = obBlocks(dept, obRoles).map(function (blk) {
+        var r = blk.role, n = obMonthList(blk.dept, r, obsDate.slice(0, 7)).length;
+        var sfx = (n % 100 >= 11 && n % 100 <= 13) ? "th" : ({ 1: "st", 2: "nd", 3: "rd" }[n % 10] || "th");
+        return "your " + n + sfx + " of " + OB_TARGETS[r] + " as " + obBlockLabel(blk) + " in " + blk.dept + " this month";
+      });
+      document.getElementById("ob-confirm").textContent = obCountMsg.length
+        ? "Observation logged ✓ — This is " + obCountMsg.join(", and ") + "."
+        : "Observation logged ✓";
       obConfirm.show();
+      renderObProgress();
       });
     }).catch(function (e) { unlockOb(); handleSaveFailure(e); });
   });
@@ -5436,6 +5561,7 @@
 
   function render() {
     applyAccessMode();
+    try { renderObProgress(); } catch (e) { if (window.console) console.error(e); }
     renderAccessGate();
     renderStats();
     renderOpenEscalations();
