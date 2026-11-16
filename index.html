@@ -1130,7 +1130,7 @@
       </span>
       <span class="action-text">
         <div class="action-title">Staff Directory</div>
-        <div class="action-sub">Name, email and hire date — powers the Leave feature</div>
+        <div class="action-sub">Name, email, hire date and birthday — powers the Leave feature and birthday reminders</div>
       </span>
       <svg class="chevron" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"></path></svg>
     </button>
@@ -1150,6 +1150,16 @@
         <input type="date" id="sd-hiredate-native" tabindex="-1" aria-hidden="true">
       </div>
 
+      <label for="sd-emp">Employment</label>
+      <select id="sd-emp">
+        <option value="" disabled selected>Full time or Part time?</option>
+        <option value="Full time">Full time</option>
+        <option value="Part time">Part time</option>
+      </select>
+
+      <label for="sd-birthday">Birthday <span style="font-weight:400; opacity:.7;">(day/month — optional)</span></label>
+      <input type="text" id="sd-birthday" inputmode="numeric" placeholder="DD/MM" maxlength="5" autocomplete="off" style="max-width:120px;">
+
       <label>Title</label>
       <p class="hint" style="margin-top:0;">Tap all that apply — one person can hold more than one title (e.g. Technical Director and HOD of a department).</p>
       <div class="chip-row" id="sd-role-chips">
@@ -1161,6 +1171,10 @@
         <button type="button" class="chip" data-val="Therapist">Therapist</button>
         <button type="button" class="chip" data-val="Senior Therapist">Senior Therapist</button>
         <button type="button" class="chip" data-val="Trainee">Trainee</button>
+        <button type="button" class="chip" data-val="Operations Director">Operations Director</button>
+        <button type="button" class="chip" data-val="Senior Admin">Senior Admin</button>
+        <button type="button" class="chip" data-val="Admin">Admin</button>
+        <button type="button" class="chip" data-val="HR Specialist">HR Specialist</button>
       </div>
 
       <div id="sd-dept-group">
@@ -1775,7 +1789,7 @@
   // comes straight from that row, which is already seeded with this value.
   var DEFAULT_CODE_HASH = "i41k4k";
   var settingsRid = null;
-  var annualQuotaRid = null, casualQuotaRid = null;
+  var annualQuotaRid = null, casualQuotaRid = null, partAnnualQuotaRid = null, partCasualQuotaRid = null;
 
   function atUrl(tableId, path) {
     return "https://api.airtable.com/v0/" + AIRTABLE_BASE + "/" + tableId + (path || "");
@@ -1947,7 +1961,7 @@
     conductIncidents: [],
     childNames: [],
     codeHash: DEFAULT_CODE_HASH,
-    annualLeaveQuota: 21, casualLeaveQuota: 6,
+    annualLeaveQuota: 15, casualLeaveQuota: 6, partAnnualLeaveQuota: 8, partCasualLeaveQuota: 3,
     clinicalQualityTargetPct: 90
   };
 
@@ -2026,7 +2040,7 @@
       // every row here is explicitly created with active:true and only
       // ever explicitly PATCHed to active:false on deactivation — so
       // "not === true" correctly means inactive, never an ambiguous case.
-      return Object.assign(base, { name: f.name || "", email: f.email || "", hireDate: f.hireDate || "", roles: f.roles || [], department: f.department || "", active: f.active === true, payType: f.payType || "" });
+      return Object.assign(base, { name: f.name || "", email: f.email || "", hireDate: f.hireDate || "", roles: f.roles || [], department: f.department || "", active: f.active === true, payType: f.payType || "", birthday: f.birthday || "", employmentType: f.employmentType || "" });
     }
     if (key === "leaveRequests") {
       return Object.assign(base, {
@@ -2189,6 +2203,12 @@
         if (annualRow) { state.annualLeaveQuota = parseFloat(annualRow.fields.value) || state.annualLeaveQuota; annualQuotaRid = annualRow.id; }
         var casualRow = records.filter(function (r) { return r.fields && r.fields.key === "casualLeaveQuota"; })[0];
         if (casualRow) { state.casualLeaveQuota = parseFloat(casualRow.fields.value) || state.casualLeaveQuota; casualQuotaRid = casualRow.id; }
+        // Part-time quotas (added 2026-11-16). annualLeaveQuota/casualLeaveQuota
+        // above are now the FULL-TIME numbers.
+        var pAnnualRow = records.filter(function (r) { return r.fields && r.fields.key === "partAnnualLeaveQuota"; })[0];
+        if (pAnnualRow) { var pa = parseFloat(pAnnualRow.fields.value); if (pa >= 0) state.partAnnualLeaveQuota = pa; partAnnualQuotaRid = pAnnualRow.id; }
+        var pCasualRow = records.filter(function (r) { return r.fields && r.fields.key === "partCasualLeaveQuota"; })[0];
+        if (pCasualRow) { var pc = parseFloat(pCasualRow.fields.value); if (pc >= 0) state.partCasualLeaveQuota = pc; partCasualQuotaRid = pCasualRow.id; }
         var cqTargetRow = records.filter(function (r) { return r.fields && r.fields.key === "clinicalQualityTargetPct"; })[0];
         if (cqTargetRow) { state.clinicalQualityTargetPct = parseFloat(cqTargetRow.fields.value) || state.clinicalQualityTargetPct; }
       }).catch(function (e) {
@@ -2428,6 +2448,25 @@
     var d = new Date(year, month - 1, day);
     if (d.getFullYear() !== year || d.getMonth() !== month - 1 || d.getDate() !== day) return null;
     return year + "-" + pad2(month) + "-" + pad2(day);
+  }
+
+  // Birthday (added 2026-11-16, per Haidy): day + month only, stored as
+  // "DD/MM" text — no year on purpose. Accepts 1 or 2 digits each side
+  // ("3/7" -> "03/07"); 29/02 is allowed. Returns null if not a real day.
+  var BDAY_MAX = [31, 29, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+  function parseBirthday(str) {
+    var m = /^(\d{1,2})\s*[\/\-.]\s*(\d{1,2})$/.exec((str || "").trim());
+    if (!m) return null;
+    var day = parseInt(m[1], 10), month = parseInt(m[2], 10);
+    if (month < 1 || month > 12 || day < 1 || day > BDAY_MAX[month - 1]) return null;
+    return pad2(day) + "/" + pad2(month);
+  }
+  // Typing mask: digits only, slash inserted automatically after the day.
+  function maskBirthdayInput(input) {
+    input.addEventListener("input", function () {
+      var digits = input.value.replace(/\D/g, "").slice(0, 4);
+      input.value = digits.length > 2 ? digits.slice(0, 2) + "/" + digits.slice(2) : digits;
+    });
   }
 
   function isoToDMY(iso) {
@@ -3059,25 +3098,59 @@
   // chips) — a flag chip should name the issue being flagged, not a neutral
   // topic word that leaves it ambiguous whether tapping means "this was fine"
   // or "this was a problem."
+  // Late split into two chips (2026-11-16, per Haidy): "Late 5–10 min" and
+  // "Late > 10 min". Stored data stays backward compatible: `late` is still
+  // true for ANY lateness (so every existing count/KPI/HR Pulse read keeps
+  // working unchanged), and the new `lateOver10` is true only for > 10 min.
+  // Only > 10 min (with Absent and Camera off) triggers the automatic
+  // "meeting note" email to the person. The two late chips are mutually
+  // exclusive. Old rows (before this change) have late but no lateOver10
+  // key at all — shown as the original "Late > 5 min".
   var FLAGS = [
     { key: "absent", label: "Absent" },
-    { key: "late", label: "Late > 5 min" },
+    { key: "lateShort", label: "Late 5–10 min" },
+    { key: "lateOver10", label: "Late > 10 min" },
     { key: "cameraOff", label: "Camera off" },
     { key: "engagement", label: "Engagement issue" },
     { key: "appearance", label: "Appearance issue" },
     { key: "other", label: "Other" }
   ];
-  var composeFlags = { absent: false, late: false, cameraOff: false, engagement: false, appearance: false, other: false };
+  var composeFlags = { absent: false, late: false, lateOver10: false, cameraOff: false, engagement: false, appearance: false, other: false };
+
+  function flagOn(a, key) {
+    if (key === "lateShort") return !!a.late && !a.lateOver10;
+    return !!a[key];
+  }
+  function toggleFlag(a, key) {
+    if (key === "lateShort") {
+      if (flagOn(a, "lateShort")) { a.late = false; } else { a.late = true; a.lateOver10 = false; }
+    } else if (key === "lateOver10") {
+      if (a.lateOver10) { a.lateOver10 = false; a.late = false; } else { a.lateOver10 = true; a.late = true; }
+    } else {
+      a[key] = !a[key];
+    }
+  }
+  // Pills for an already-saved attendee row (detail view). Rows saved before
+  // the late split have no lateOver10 key: show them as the old label.
+  function savedFlagLabels(a) {
+    var out = [];
+    FLAGS.forEach(function (f) {
+      if (f.key === "lateShort") {
+        if (a.late && !a.lateOver10) out.push(("lateOver10" in a) ? f.label : "Late > 5 min");
+      } else if (a[f.key]) out.push(f.label);
+    });
+    return out;
+  }
 
   function renderComposeFlags() {
     var wrap = document.getElementById("mt-compose-flags");
     wrap.innerHTML = FLAGS.map(function (f) {
-      return '<button type="button" class="mini-chip" data-compose-flag="' + f.key + '" aria-pressed="' + (composeFlags[f.key] ? "true" : "false") + '">' + f.label + '</button>';
+      return '<button type="button" class="mini-chip" data-compose-flag="' + f.key + '" aria-pressed="' + (flagOn(composeFlags, f.key) ? "true" : "false") + '">' + f.label + '</button>';
     }).join("");
     wrap.querySelectorAll("[data-compose-flag]").forEach(function (chip) {
       chip.addEventListener("click", function () {
         var key = chip.getAttribute("data-compose-flag");
-        composeFlags[key] = !composeFlags[key];
+        toggleFlag(composeFlags, key);
         renderComposeFlags();
       });
     });
@@ -3090,13 +3163,13 @@
     var noteInput = document.getElementById("mt-compose-note");
     pendingAttendees.push({
       name: name,
-      absent: composeFlags.absent, late: composeFlags.late, cameraOff: composeFlags.cameraOff,
+      absent: composeFlags.absent, late: composeFlags.late, lateOver10: composeFlags.lateOver10, cameraOff: composeFlags.cameraOff,
       engagement: composeFlags.engagement, appearance: composeFlags.appearance,
       other: composeFlags.other, note: noteInput.value.trim()
     });
     input.value = "";
     noteInput.value = "";
-    composeFlags = { absent: false, late: false, cameraOff: false, engagement: false, appearance: false, other: false };
+    composeFlags = { absent: false, late: false, lateOver10: false, cameraOff: false, engagement: false, appearance: false, other: false };
     renderComposeFlags();
     renderAttendees();
   });
@@ -3112,7 +3185,7 @@
       var row = document.createElement("div");
       row.className = "attendee-row";
       var flagsHtml = FLAGS.map(function (f) {
-        return '<button type="button" class="mini-chip" data-idx="' + idx + '" data-flag="' + f.key + '" aria-pressed="' + (a[f.key] ? "true" : "false") + '">' + f.label + '</button>';
+        return '<button type="button" class="mini-chip" data-idx="' + idx + '" data-flag="' + f.key + '" aria-pressed="' + (flagOn(a, f.key) ? "true" : "false") + '">' + f.label + '</button>';
       }).join("");
       row.innerHTML = '<div class="attendee-top"><span class="attendee-name">' + escapeHtml(a.name) + '</span>' +
         '<span class="attendee-flags">' + flagsHtml + '</span>' +
@@ -3123,7 +3196,7 @@
     wrap.querySelectorAll("[data-flag]").forEach(function (chip) {
       chip.addEventListener("click", function () {
         var idx = +chip.getAttribute("data-idx"), key = chip.getAttribute("data-flag");
-        pendingAttendees[idx][key] = !pendingAttendees[idx][key];
+        toggleFlag(pendingAttendees[idx], key);
         renderAttendees();
       });
     });
@@ -4058,13 +4131,31 @@
   // before newer ones; whatever is left in a cycle once its cutoff
   // passes is dropped from the running total for good (days already
   // taken are of course never affected).
+  // Full time / Part time + 3-month waiting period (2026-11-16, per Haidy
+  // relaying management): Full time = 15 annual + 6 casual, Part time =
+  // 8 annual + 3 casual (numbers editable under "Leave quotas"). Nothing is
+  // granted in the first 3 months after the hire date; the first year's
+  // full quota becomes available on hire date + 3 months. Later years are
+  // granted on each hire anniversary as before. Empty employmentType is
+  // treated as Full time.
+  function leaveEligibleFrom(hireDateIso) {
+    var hire = new Date(hireDateIso + "T00:00:00");
+    if (isNaN(hire.getTime())) return null;
+    var d = new Date(hire.getFullYear(), hire.getMonth() + 3, hire.getDate());
+    // e.g. 30 Nov + 3 months rolls to 2 Mar; clamp to the last day of the target month
+    if (d.getDate() !== hire.getDate()) d = new Date(hire.getFullYear(), hire.getMonth() + 4, 0);
+    return d;
+  }
+  function isPartTime(person) { return !!person && person.employmentType === "Part time"; }
   function leaveCycles(hireDateIso, today) {
     var hire = new Date(hireDateIso + "T00:00:00");
     var cycles = [];
     if (isNaN(hire.getTime())) return cycles;
+    var eligibleFrom = leaveEligibleFrom(hireDateIso);
     for (var k = 0; ; k++) {
       var grantDate = new Date(hire.getFullYear() + k, hire.getMonth(), hire.getDate());
       if (grantDate > today) break;
+      if (k === 0 && eligibleFrom > today) break; // still inside the first 3 months
       var nextAnniversary = new Date(hire.getFullYear() + k + 1, hire.getMonth(), hire.getDate());
       // Carries over past nextAnniversary, forfeited once 31 March of the
       // following calendar year has passed (i.e. gone as of 1 April).
@@ -4073,13 +4164,14 @@
     }
     return cycles;
   }
-  function leaveQuotaFor(leaveType) {
+  function leaveQuotaFor(leaveType, person) {
+    if (isPartTime(person)) return leaveType === "casual" ? state.partCasualLeaveQuota : state.partAnnualLeaveQuota;
     return leaveType === "casual" ? state.casualLeaveQuota : state.annualLeaveQuota;
   }
   function leaveBalance(staffName, leaveType) {
     var person = state.staffDirectory.filter(function (p) { return p.name === staffName; })[0];
     if (!person || !person.hireDate) return null;
-    var quota = leaveQuotaFor(leaveType);
+    var quota = leaveQuotaFor(leaveType, person);
     var today = new Date();
     var cycles = leaveCycles(person.hireDate, today);
     var taken = state.leaveRequests
@@ -4099,7 +4191,8 @@
         remaining += quota - usedFromThisCycle;
       }
     });
-    return { granted: granted, taken: taken, remaining: remaining };
+    var eligibleFrom = leaveEligibleFrom(person.hireDate);
+    return { granted: granted, taken: taken, remaining: remaining, eligibleFrom: eligibleFrom && eligibleFrom > today ? eligibleFrom : null, partTime: isPartTime(person) };
   }
 
   function refreshLeaveStaffOptions() {
@@ -4122,7 +4215,8 @@
     var a = leaveBalance(name, "annual");
     var c = leaveBalance(name, "casual");
     if (!a || !c) { hint.textContent = "No hire date on file for " + name + " yet — add it in Staff Directory."; return; }
-    hint.textContent = "Annual: " + a.remaining + "/" + a.granted + " remaining · Casual: " + c.remaining + "/" + c.granted + " remaining";
+    hint.textContent = (a.partTime ? "Part time · " : "Full time · ") + "Annual: " + a.remaining + "/" + a.granted + " remaining · Casual: " + c.remaining + "/" + c.granted + " remaining" +
+      (a.eligibleFrom ? " — no leave balance yet: eligible from " + formatDateDMY(a.eligibleFrom) + " (3 months after hire date)" : "");
   }
 
   var leaveType = null;
@@ -4261,7 +4355,8 @@
       var c = leaveBalance(p.name, "casual");
       html += '<div class="esc-item">' +
         '<div class="esc-info"><div class="esc-dept">' + escapeHtml(p.name) + '</div>' +
-        '<div class="esc-meta">Annual: ' + (a ? a.remaining + "/" + a.granted : "—") + ' · Casual: ' + (c ? c.remaining + "/" + c.granted : "—") + '</div></div>' +
+        '<div class="esc-meta">' + (a ? (a.partTime ? "Part time · " : "Full time · ") : "") + 'Annual: ' + (a ? a.remaining + "/" + a.granted : "—") + ' · Casual: ' + (c ? c.remaining + "/" + c.granted : "—") +
+        (a && a.eligibleFrom ? ' · eligible from ' + formatDateDMY(a.eligibleFrom) : '') + '</div></div>' +
         '</div>';
     });
     wrap.innerHTML = html;
@@ -4386,7 +4481,8 @@
   // the older single-choice "role" field is kept only for history and is no
   // longer written to.
   function needsDeptRoles(roles) {
-    return (roles || []).some(function (r) { return r && r !== "Technical Director" && r !== "Technical Coordinator"; });
+    var ORG_WIDE = ["Technical Director", "Technical Coordinator", "Operations Director", "Senior Admin", "Admin", "HR Specialist"];
+    return (roles || []).some(function (r) { return r && ORG_WIDE.indexOf(r) === -1; });
   }
   document.querySelectorAll("#sd-role-chips .chip").forEach(function (c) {
     c.addEventListener("click", function () {
@@ -4411,6 +4507,9 @@
     var name = nameInput.value.trim();
     var email = emailInput.value.trim();
     var hireDate = parseDMY(hireInput.value);
+    var bdayInput = document.getElementById("sd-birthday");
+    var bdayRaw = bdayInput.value.trim();
+    var birthday = bdayRaw ? parseBirthday(bdayRaw) : "";
     var roles = getSdRoles();
     // Department only applies when at least one chosen title is tied to a
     // specific department — Technical Director and Technical Coordinator are
@@ -4421,6 +4520,9 @@
     if (!name) { err.textContent = "Enter a name."; err.style.display = "block"; return; }
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) { err.textContent = "Enter a valid email."; err.style.display = "block"; return; }
     if (!hireDate) { err.textContent = "Enter a valid hire date (DD/MM/YYYY)."; err.style.display = "block"; return; }
+    if (bdayRaw && !birthday) { err.textContent = "Birthday must be a real day and month, e.g. 14/03 (or leave it empty)."; err.style.display = "block"; return; }
+    var empSelect = document.getElementById("sd-emp");
+    if (!empSelect.value) { err.textContent = "Choose Full time or Part time (it sets their leave days)."; err.style.display = "block"; return; }
     if (!roles.length) { err.textContent = "Tap at least one title."; err.style.display = "block"; return; }
     if (needsDept && !dept) { err.textContent = "Choose their department."; err.style.display = "block"; return; }
     if (state.staffDirectory.some(function (p) { return p.name.toLowerCase() === name.toLowerCase(); })) {
@@ -4428,12 +4530,12 @@
     }
     err.style.display = "none";
 
-    var entry = { id: "sd" + Date.now(), name: name, email: email, hireDate: hireDate, roles: roles, department: dept, active: true };
+    var entry = { id: "sd" + Date.now(), name: name, email: email, hireDate: hireDate, birthday: birthday, employmentType: empSelect.value, roles: roles, department: dept, active: true };
     var fields = compact(entry);
     atCreate(TABLES.staffDirectory, fields).then(function (rec) {
       entry._rid = rec.id;
       state.staffDirectory.push(entry);
-      nameInput.value = ""; emailInput.value = ""; hireInput.value = formatDateDMY(new Date()); resetSdRoles(); deptSelect.value = "";
+      nameInput.value = ""; emailInput.value = ""; bdayInput.value = ""; empSelect.value = ""; hireInput.value = formatDateDMY(new Date()); resetSdRoles(); deptSelect.value = "";
       updateSdDeptVisibility();
       render();
     }).catch(handleSaveFailure);
@@ -4446,6 +4548,7 @@
     if (!needsDept) document.getElementById("sd-dept").value = "";
   }
   updateSdDeptVisibility();
+  maskBirthdayInput(document.getElementById("sd-birthday"));
 
   function updateStaffDirectory(id, patch) {
     var item = state.staffDirectory.filter(function (p) { return p.id === id; })[0];
@@ -4463,14 +4566,21 @@
   // above) can be attributed to the right person's own KPI scorecard;
   // every incident counts only against the specific person it's logged
   // against, never cascaded up to whoever oversees them).
-  var STAFF_TITLES = ["Technical Director", "Technical Coordinator", "Consultant", "HOD", "Deputy", "Therapist", "Senior Therapist", "Trainee"];
+  // Admin titles added 2026-11-16 (per Haidy): Operations Director (Nour
+  // already had it in Airtable but it was missing here, so tapping any chip
+  // on her row would have silently dropped it), Senior Admin, Admin, HR
+  // Specialist. These are org-wide (no department) and have no KPI sheet /
+  // Session Log role.
+  var STAFF_TITLES = ["Technical Director", "Technical Coordinator", "Operations Director", "Consultant", "HOD", "Deputy", "Therapist", "Senior Therapist", "Trainee", "Senior Admin", "Admin", "HR Specialist"];
 
   function renderStaffDirectory() {
     var wrap = document.getElementById("sd-list");
     if (!wrap) return;
     var all = state.staffDirectory.slice().sort(function (a, b) { return a.name.localeCompare(b.name); });
     if (!all.length) { wrap.innerHTML = '<p class="empty-note">No staff added yet.</p>'; return; }
-    var html = "";
+    var activeAll = all.filter(function (p) { return p.active; });
+    var bdayMissing = activeAll.filter(function (p) { return !p.birthday; }).length;
+    var html = '<p class="hint" style="margin:0 0 8px;">Birthdays filled: ' + (activeAll.length - bdayMissing) + ' of ' + activeAll.length + ' active staff' + (bdayMissing ? ' — empty ones have a dashed orange box.' : ' ✓') + '</p>';
     all.forEach(function (p) {
       var roles = p.roles || [];
       // Chip-row (fixed 2026-09-13 — the earlier ctrl/cmd-click multi-select
@@ -4501,13 +4611,24 @@
         '</button>' +
         '<input type="date" class="sd-hiredate-native" tabindex="-1" aria-hidden="true">' +
         '</div>';
+      // Birthday (added 2026-11-16): DD/MM only, saved on blur. Dashed amber
+      // border when empty so HR can spot who still needs one.
+      var bdayHtml = '<input type="text" class="sd-bday-input" data-sd-bdayfor="' + p.id + '" inputmode="numeric" placeholder="DD/MM" maxlength="5" autocomplete="off" value="' + escapeHtml(p.birthday || "") + '" style="max-width:120px; margin-top:2px;' + (p.birthday || !p.active ? "" : " border:1px dashed #e8a33d;") + '">';
+      // Employment (added 2026-11-16): decides the leave quota. Empty = Full time
+      // for leave purposes, but highlighted so HR sets it explicitly.
+      var empHtml = '<select class="sd-emp-select" data-sd-empfor="' + p.id + '" style="margin-top:2px;' + (p.employmentType || !p.active ? "" : " border-color:#e8a33d;") + '">' +
+        '<option value=""' + (p.employmentType ? "" : " selected") + ' disabled>Not set (counted as Full time)</option>' +
+        '<option value="Full time"' + (p.employmentType === "Full time" ? " selected" : "") + '>Full time — ' + state.annualLeaveQuota + ' annual + ' + state.casualLeaveQuota + ' casual</option>' +
+        '<option value="Part time"' + (p.employmentType === "Part time" ? " selected" : "") + '>Part time — ' + state.partAnnualLeaveQuota + ' annual + ' + state.partCasualLeaveQuota + ' casual</option>' +
+        '</select>';
       // Pay type (added 2026-10-28, per Haidy): "Fixed salary" staff are not
       // paid per session, so the Session Log page hides them. Empty = per session.
       var SESSION_LOG_TITLES = ["HOD", "Deputy", "Consultant", "Therapist", "Senior Therapist"];
       var payHtml = roles.some(function (r) { return SESSION_LOG_TITLES.indexOf(r) !== -1; })
         ? '<p class="hint" style="margin:6px 0 0;">Pay (Session Log):</p>' +
           '<select class="sd-pay-select" data-sd-payfor="' + p.id + '">' +
-          '<option value="Per session"' + (p.payType === "Fixed salary" ? "" : " selected") + '>Per session — logs in Session Log</option>' +
+          '<option value="Per session"' + (p.payType === "Fixed salary" || p.payType === "Fixed + per session" ? "" : " selected") + '>Per session — logs in Session Log</option>' +
+          '<option value="Fixed + per session"' + (p.payType === "Fixed + per session" ? " selected" : "") + '>Fixed + per session — logs only per-session work</option>' +
           '<option value="Fixed salary"' + (p.payType === "Fixed salary" ? " selected" : "") + '>Fixed salary — hidden from Session Log</option>' +
           '</select>'
         : "";
@@ -4516,6 +4637,10 @@
         '<div class="esc-meta">' + escapeHtml(p.email) + '</div>' +
         '<p class="hint" style="margin:6px 0 0;">Hire date:</p>' +
         hireDateHtml +
+        '<p class="hint" style="margin:6px 0 0;">Employment (leave quota):</p>' +
+        empHtml +
+        '<p class="hint" style="margin:6px 0 0;">Birthday (day/month):</p>' +
+        bdayHtml +
         '<p class="hint" style="margin:6px 0 0;">Title(s) — tap to add or remove:</p>' +
         roleChipsHtml +
         deptSelectHtml + payHtml + '</div>' +
@@ -4574,6 +4699,26 @@
     });
     wrap.querySelectorAll("[data-sd-deptfor]").forEach(function (sel) {
       sel.addEventListener("change", function () { updateStaffDirectory(sel.getAttribute("data-sd-deptfor"), { department: sel.value }); });
+    });
+    wrap.querySelectorAll("[data-sd-empfor]").forEach(function (sel) {
+      sel.addEventListener("change", function () { updateStaffDirectory(sel.getAttribute("data-sd-empfor"), { employmentType: sel.value }); });
+    });
+    wrap.querySelectorAll(".sd-bday-input").forEach(function (input) {
+      var id = input.getAttribute("data-sd-bdayfor");
+      maskBirthdayInput(input);
+      input.addEventListener("blur", function () {
+        var item = state.staffDirectory.filter(function (p) { return p.id === id; })[0];
+        if (!item) return;
+        var raw = input.value.trim();
+        if (!raw) {
+          if (item.birthday) updateStaffDirectory(id, { birthday: "" });
+          return;
+        }
+        var v = parseBirthday(raw);
+        if (!v) { showToast("Birthday must be a real day/month, e.g. 14/03"); input.value = item.birthday || ""; return; }
+        if (v === item.birthday) { input.value = v; return; }
+        updateStaffDirectory(id, { birthday: v });
+      });
     });
     wrap.querySelectorAll("[data-sd-payfor]").forEach(function (sel) {
       sel.addEventListener("change", function () { updateStaffDirectory(sel.getAttribute("data-sd-payfor"), { payType: sel.value }); });
@@ -5110,7 +5255,7 @@
       var list = x.entries || [];
       h += '<div class="detail-sub">Attendees (' + list.length + ')</div>';
       list.forEach(function (a) {
-        var pills = FLAGS.filter(function (f) { return !!a[f.key]; }).map(function (f) { return '<span class="pill warn">' + f.label + '</span>'; }).join("");
+        var pills = savedFlagLabels(a).map(function (l) { return '<span class="pill warn">' + l + '</span>'; }).join("");
         h += '<div class="detail-att"><span class="detail-att-name" dir="auto">' + escapeHtml(a.name) + '</span>' +
           (pills || '<span class="pill ok">No flags</span>') +
           (a.note ? '<div class="detail-att-note" dir="auto">' + escapeHtml(a.note) + '</div>' : '') + '</div>';
@@ -5465,16 +5610,24 @@
   // quota Settings rows (added 2026-09-01). Same numbers for every staff
   // member per Haidy's decision, so one pair of Settings rows covers
   // everyone — editable here any time without a code change.
-  function changeLeaveQuotas(annual, casual) {
+  function changeLeaveQuotas(annual, casual, pAnnual, pCasual) {
     var p1 = annualQuotaRid
       ? atUpdate(TABLES.settings, annualQuotaRid, { value: String(annual) })
       : atCreate(TABLES.settings, { key: "annualLeaveQuota", value: String(annual) }).then(function (rec) { annualQuotaRid = rec.id; });
     var p2 = casualQuotaRid
       ? atUpdate(TABLES.settings, casualQuotaRid, { value: String(casual) })
       : atCreate(TABLES.settings, { key: "casualLeaveQuota", value: String(casual) }).then(function (rec) { casualQuotaRid = rec.id; });
-    Promise.all([p1, p2]).then(function () {
+    var p3 = partAnnualQuotaRid
+      ? atUpdate(TABLES.settings, partAnnualQuotaRid, { value: String(pAnnual) })
+      : atCreate(TABLES.settings, { key: "partAnnualLeaveQuota", value: String(pAnnual) }).then(function (rec) { partAnnualQuotaRid = rec.id; });
+    var p4 = partCasualQuotaRid
+      ? atUpdate(TABLES.settings, partCasualQuotaRid, { value: String(pCasual) })
+      : atCreate(TABLES.settings, { key: "partCasualLeaveQuota", value: String(pCasual) }).then(function (rec) { partCasualQuotaRid = rec.id; });
+    Promise.all([p1, p2, p3, p4]).then(function () {
       state.annualLeaveQuota = annual;
       state.casualLeaveQuota = casual;
+      state.partAnnualLeaveQuota = pAnnual;
+      state.partCasualLeaveQuota = pCasual;
       showToast("Leave quotas updated");
       render();
     }).catch(handleSaveFailure);
@@ -5497,8 +5650,12 @@
         '<button type="button" class="btn small" id="changecode-submit" style="margin-top:0;">Save</button>' +
         '</div>' +
         '<div class="access-form" id="leavequota-form" style="display:none;">' +
-        '<input type="number" id="new-annual-quota" min="0" step="1" placeholder="Annual days/year" value="' + state.annualLeaveQuota + '">' +
-        '<input type="number" id="new-casual-quota" min="0" step="1" placeholder="Casual days/year" value="' + state.casualLeaveQuota + '">' +
+        '<span class="hint" style="width:100%; margin:0;">Full time — annual / casual days per year</span>' +
+        '<input type="number" id="new-annual-quota" min="0" step="1" placeholder="Full time annual" value="' + state.annualLeaveQuota + '">' +
+        '<input type="number" id="new-casual-quota" min="0" step="1" placeholder="Full time casual" value="' + state.casualLeaveQuota + '">' +
+        '<span class="hint" style="width:100%; margin:0;">Part time — annual / casual days per year</span>' +
+        '<input type="number" id="new-pannual-quota" min="0" step="1" placeholder="Part time annual" value="' + state.partAnnualLeaveQuota + '">' +
+        '<input type="number" id="new-pcasual-quota" min="0" step="1" placeholder="Part time casual" value="' + state.partCasualLeaveQuota + '">' +
         '<button type="button" class="btn small" id="leavequota-submit" style="margin-top:0;">Save</button>' +
         '</div></div>';
       document.getElementById("lock-btn").addEventListener("click", function () {
@@ -5529,8 +5686,10 @@
       var submitLeaveQuota = function () {
         var a = parseFloat(document.getElementById("new-annual-quota").value);
         var c = parseFloat(document.getElementById("new-casual-quota").value);
-        if (!(a >= 0) || !(c >= 0)) { showToast("Enter valid day counts"); return; }
-        changeLeaveQuotas(a, c);
+        var pa = parseFloat(document.getElementById("new-pannual-quota").value);
+        var pc = parseFloat(document.getElementById("new-pcasual-quota").value);
+        if (!(a >= 0) || !(c >= 0) || !(pa >= 0) || !(pc >= 0)) { showToast("Enter valid day counts"); return; }
+        changeLeaveQuotas(a, c, pa, pc);
       };
       document.getElementById("leavequota-submit").addEventListener("click", submitLeaveQuota);
     } else {
