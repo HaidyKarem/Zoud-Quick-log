@@ -1175,6 +1175,7 @@
         <button type="button" class="chip" data-val="Senior Admin">Senior Admin</button>
         <button type="button" class="chip" data-val="Admin">Admin</button>
         <button type="button" class="chip" data-val="HR Specialist">HR Specialist</button>
+        <button type="button" class="chip" data-val="Accountant">Accountant</button>
       </div>
 
       <div id="sd-dept-group">
@@ -1910,12 +1911,16 @@
   }
 
   function atCreate(tableId, fields) {
-    return withAutoLock(atRequest("POST", tableId, { body: { records: [{ fields: fields }] } }).then(function (data) {
+    var body = { records: [{ fields: fields }] };
+    if (tableId === TABLES.staffDirectory) body.typecast = true; // lets new title choices (e.g. Accountant) save
+    return withAutoLock(atRequest("POST", tableId, { body: body }).then(function (data) {
       return data.records[0];
     }));
   }
   function atUpdate(tableId, recordId, fields) {
-    return atRequest("PATCH", tableId, { path: "/" + recordId, body: { fields: fields } });
+    var body = { fields: fields };
+    if (tableId === TABLES.staffDirectory) body.typecast = true;
+    return atRequest("PATCH", tableId, { path: "/" + recordId, body: body });
   }
   function atDelete(tableId, recordId) {
     return atRequest("DELETE", tableId, { path: "/" + recordId });
@@ -2163,12 +2168,29 @@
     ["conductIncidents", TABLES.conductIncidents]
   ];
 
+  // Faster load (2026-11-23, per Haidy — staff said the Cover Sessions list
+  // took a long time to appear). Before: all 15 tables + child names +
+  // Settings were fetched ONE AFTER ANOTHER and nothing showed until the very
+  // last one finished. Now: up to 3 tables load at the same time (stays
+  // under Airtable's 5 requests/sec; 429s are still retried in atRequest),
+  // Settings + Session Coverage + Staff Directory + Leave go first, and the
+  // page re-renders as each table arrives instead of waiting for all.
+  state.loaded = {};
+  var _renderTimer = null;
+  function scheduleRender() {
+    if (_renderTimer) return;
+    _renderTimer = setTimeout(function () { _renderTimer = null; render(); }, 60);
+  }
   function loadAllData() {
     var hadError = false;
-    var chain = Promise.resolve();
-    TABLE_STATE_KEYS.forEach(function (pair) {
+    var PRIORITY = ["sessionCoverage", "staffDirectory", "leaveRequests"];
+    var ordered = TABLE_STATE_KEYS.slice().sort(function (a, b) {
+      var ia = PRIORITY.indexOf(a[0]), ib = PRIORITY.indexOf(b[0]);
+      return (ia === -1 ? 99 : ia) - (ib === -1 ? 99 : ib);
+    });
+    var jobs = [loadSettings].concat(ordered.map(function (pair) {
       var key = pair[0], tableId = pair[1];
-      chain = chain.then(function () {
+      return function () {
         return atListAll(tableId).then(function (records) {
           var list = records.map(function (r) { return recordToEntry(key, r); });
           list.sort(function (a, b) { return new Date(b.loggedAt) - new Date(a.loggedAt); });
@@ -2176,21 +2198,30 @@
         }).catch(function (e) {
           hadError = true;
           if (window.console && console.error) console.error("Failed to load " + key, e);
-        });
-      });
-    });
-    chain = chain.then(function () {
+        }).then(function () { state.loaded[key] = true; scheduleRender(); });
+      };
+    }));
+    jobs.push(function () {
       // Non-critical: a failure here never sets hadError / shows the
       // "not connected" banner — the Coverage form still works fine
-      // without the child-name autocomplete, it just falls back to a
-      // plain free-text field like before.
+      // without the child-name autocomplete.
       return fetchChildNames().then(function (records) {
         state.childNames = records.map(function (r) { return (r.fields && r.fields.Name) || ""; }).filter(Boolean);
       }).catch(function (e) {
         if (window.console && console.error) console.error("Failed to load child names (non-critical)", e);
-      });
+      }).then(scheduleRender);
     });
-    chain = chain.then(function () {
+    var next = 0;
+    function worker() {
+      if (next >= jobs.length) return Promise.resolve();
+      var job = jobs[next++];
+      return job().then(worker, worker);
+    }
+    var pool = [];
+    for (var w = 0; w < 3; w++) pool.push(worker());
+    return Promise.all(pool).then(function () { return hadError; });
+
+    function loadSettings() {
       return atListAll(TABLES.settings).then(function (records) {
         var row = records.filter(function (r) { return r.fields && r.fields.key === "codeHash"; })[0];
         if (row) {
@@ -2215,9 +2246,8 @@
         hadError = true;
         state.codeHash = state.codeHash || DEFAULT_CODE_HASH;
         if (window.console && console.error) console.error("Failed to load Settings", e);
-      });
-    });
-    return chain.then(function () { return hadError; });
+      }).then(scheduleRender);
+    }
   }
 
   // ---- submit-confirmation banners: plain in-memory show/hide, no reload
@@ -4053,7 +4083,10 @@
     // is now Covered-and-pending only, same restriction applied to the stats
     // count and the Recent Activity tag below.
     var pending = state.sessionCoverage.filter(function (c) { return c.coverageStatus === "covered" && (c.parentNotified === "not_yet" || c.parentApproved === "waiting"); });
-    if (!pending.length) { wrap.innerHTML = ""; return; }
+    if (!pending.length) {
+      wrap.innerHTML = state.loaded && state.loaded.sessionCoverage ? "" : '<p class="empty-note">Loading cover sessions…</p>';
+      return;
+    }
     var html = "";
     pending.forEach(function (c) {
       // One resolution step per pending Covered entry (2026-09-19 redesign,
@@ -4481,7 +4514,7 @@
   // the older single-choice "role" field is kept only for history and is no
   // longer written to.
   function needsDeptRoles(roles) {
-    var ORG_WIDE = ["Technical Director", "Technical Coordinator", "Operations Director", "Senior Admin", "Admin", "HR Specialist"];
+    var ORG_WIDE = ["Technical Director", "Technical Coordinator", "Operations Director", "Senior Admin", "Admin", "HR Specialist", "Accountant"];
     return (roles || []).some(function (r) { return r && ORG_WIDE.indexOf(r) === -1; });
   }
   document.querySelectorAll("#sd-role-chips .chip").forEach(function (c) {
@@ -4571,7 +4604,8 @@
   // on her row would have silently dropped it), Senior Admin, Admin, HR
   // Specialist. These are org-wide (no department) and have no KPI sheet /
   // Session Log role.
-  var STAFF_TITLES = ["Technical Director", "Technical Coordinator", "Operations Director", "Consultant", "HOD", "Deputy", "Therapist", "Senior Therapist", "Trainee", "Senior Admin", "Admin", "HR Specialist"];
+  var STAFF_TITLES = ["Technical Director", "Technical Coordinator", "Operations Director", "Consultant", "HOD", "Deputy", "Therapist", "Senior Therapist", "Trainee", "Senior Admin", "Admin", "HR Specialist", "Accountant"];
+  // Accountant added 2026-11-23 (per Haidy) — org-wide, no KPI / Session Log role.
 
   function renderStaffDirectory() {
     var wrap = document.getElementById("sd-list");
@@ -4634,7 +4668,10 @@
         : "";
       html += '<div class="esc-item">' +
         '<div class="esc-info"><div class="esc-dept">' + escapeHtml(p.name) + (p.active ? "" : " (inactive)") + '</div>' +
-        '<div class="esc-meta">' + escapeHtml(p.email) + '</div>' +
+        // Editable email (added 2026-11-23, per Haidy — HR needs to fix
+        // emails, e.g. personal Gmail -> @zoudeg.com). Saved on blur.
+        '<p class="hint" style="margin:6px 0 0;">Email:</p>' +
+        '<input type="email" class="sd-email-input" data-sd-emailfor="' + p.id + '" autocomplete="off" value="' + escapeHtml(p.email || "") + '" style="max-width:280px; margin-top:2px;' + (p.email || !p.active ? "" : " border:1px dashed #e8a33d;") + '">' +
         '<p class="hint" style="margin:6px 0 0;">Hire date:</p>' +
         hireDateHtml +
         '<p class="hint" style="margin:6px 0 0;">Employment (leave quota):</p>' +
@@ -4702,6 +4739,28 @@
     });
     wrap.querySelectorAll("[data-sd-empfor]").forEach(function (sel) {
       sel.addEventListener("change", function () { updateStaffDirectory(sel.getAttribute("data-sd-empfor"), { employmentType: sel.value }); });
+    });
+    wrap.querySelectorAll(".sd-email-input").forEach(function (input) {
+      var id = input.getAttribute("data-sd-emailfor");
+      input.addEventListener("blur", function () {
+        var item = state.staffDirectory.filter(function (p) { return p.id === id; })[0];
+        if (!item) return;
+        var v = input.value.trim().toLowerCase();
+        var oldEmail = item.email || "";
+        if (v === oldEmail.toLowerCase()) { input.value = oldEmail; return; }
+        if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v)) { showToast("Enter a valid email, e.g. name@zoudeg.com"); input.value = oldEmail; return; }
+        var clash = state.staffDirectory.filter(function (p) { return p.id !== id && (p.email || "").toLowerCase() === v; })[0];
+        if (clash) { showToast("This email already belongs to " + clash.name); input.value = oldEmail; return; }
+        // Leave requests copy the email at submit time, so move any still-open
+        // request of this person to the new address (the outcome email goes there).
+        state.leaveRequests.forEach(function (l) {
+          if (l.status === "pending" && l.staffName === item.name && l._rid) {
+            atUpdate(TABLES.leaveRequests, l._rid, { staffEmail: v }).then(function () { l.staffEmail = v; }).catch(handleSaveFailure);
+          }
+        });
+        updateStaffDirectory(id, { email: v });
+        showToast("Email updated for " + item.name);
+      });
     });
     wrap.querySelectorAll(".sd-bday-input").forEach(function (input) {
       var id = input.getAttribute("data-sd-bdayfor");
