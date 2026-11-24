@@ -1176,6 +1176,7 @@
         <button type="button" class="chip" data-val="Admin">Admin</button>
         <button type="button" class="chip" data-val="HR Specialist">HR Specialist</button>
         <button type="button" class="chip" data-val="Accountant">Accountant</button>
+        <button type="button" class="chip" data-val="Daycare Program Manager">Daycare Program Manager</button>
       </div>
 
       <div id="sd-dept-group">
@@ -1362,12 +1363,19 @@
         <button type="button" class="chip" data-val="deputy">Deputy Head</button>
         <button type="button" class="chip" data-val="technical_director">Technical Director</button>
         <button type="button" class="chip" data-val="technical_coordinator">Technical Coordinator</button>
-        <button type="button" class="chip" data-val="day_care_coordinator">Day Care Coordinator</button>
+        <button type="button" class="chip" data-val="daycare_program_manager">Daycare Program Manager</button>
       </div>
       <div class="ob-progress" id="ob-progress" style="display:none;" aria-live="polite"></div>
 
       <label for="ob-observed">Therapist observed</label>
       <input type="text" dir="auto" id="ob-observed" list="names-list" placeholder="Therapist's name">
+
+      <label>Session setting</label>
+      <div class="chip-row" id="ob-setting">
+        <button type="button" class="chip" data-val="daycare">Daycare</button>
+        <button type="button" class="chip" data-val="out">Out session</button>
+      </div>
+      <p class="hint" id="ob-setting-hint" style="margin-top:4px;">Fills in by itself from the therapist's Staff Directory setting.</p>
 
       <label for="ob-child">Child</label>
       <input type="text" dir="auto" id="ob-child" list="child-names-list" placeholder="Pick from the list so it matches the roster exactly">
@@ -1396,7 +1404,7 @@
       <textarea dir="auto" id="ob-note" placeholder="Any quick details"></textarea>
 
       <button class="btn" id="ob-submit">Save Observation</button>
-      <p class="field-error" id="ob-error">Enter the observation date and time, select a department, who observed, the therapist's name, the child, Live or On Camera, and rate all 5 rubric criteria.</p>
+      <p class="field-error" id="ob-error">Enter the observation date and time, select a department, who observed, the therapist's name, Daycare or Out session, the child, Live or On Camera, and rate all 5 rubric criteria.</p>
     </div>
   </div>
   <p class="submit-confirm" id="ob-confirm" style="display:none;">Observation logged ✓</p>
@@ -1995,7 +2003,7 @@
       try { behavior = f.behaviorJson ? JSON.parse(f.behaviorJson) : {}; } catch (e3) { behavior = {}; }
       return Object.assign(base, {
         date: f.date || "", time: f.time || "", dept: f.dept || "", observerRole: f.observerRole || "",
-        observed: f.observed || "", child: f.child || "", observationMode: f.observationMode || "",
+        observed: f.observed || "", child: f.child || "", observationMode: f.observationMode || "", setting: f.setting || "",
         rubric: rubric, behavior: behavior, training: f.training || "", note: f.note || ""
       });
     }
@@ -2045,7 +2053,7 @@
       // every row here is explicitly created with active:true and only
       // ever explicitly PATCHed to active:false on deactivation — so
       // "not === true" correctly means inactive, never an ambiguous case.
-      return Object.assign(base, { name: f.name || "", email: f.email || "", hireDate: f.hireDate || "", roles: f.roles || [], department: f.department || "", active: f.active === true, payType: f.payType || "", birthday: f.birthday || "", employmentType: f.employmentType || "" });
+      return Object.assign(base, { name: f.name || "", email: f.email || "", hireDate: f.hireDate || "", roles: f.roles || [], department: f.department || "", active: f.active === true, payType: f.payType || "", birthday: f.birthday || "", employmentType: f.employmentType || "", workSetting: f.workSetting || "" });
     }
     if (key === "leaveRequests") {
       return Object.assign(base, {
@@ -3427,6 +3435,40 @@
   // Observation type (added 2026-09-24): Live vs On Camera, required.
   var obMode = null;
   var OB_MODE_LABELS = { live: "Live", camera: "On Camera" };
+
+  // ===== Daycare / Out session (2026-11-24, Haidy) =====
+  // Every observation records whether the session was Daycare or Out session.
+  // Filled automatically from the therapist's Staff Directory workSetting
+  // ("Daycare" -> daycare, "Out sessions" -> out). "Daycare & Out sessions"
+  // or not set -> the observer taps it. Daycare observations are emailed to
+  // the Daycare Program Manager by a scheduled task (from 1 Dec 2026).
+  var obSetting = null, obSettingAuto = false; // auto = filled from Staff Directory, not tapped
+  var OB_SETTING_LABELS = { daycare: "Daycare", out: "Out session" };
+  var WORK_SETTINGS = ["Out sessions", "Daycare", "Daycare & Out sessions"];
+  var WORK_SETTING_ICON = { "Out sessions": "🚪", "Daycare": "🏫", "Daycare & Out sessions": "🏫🚪" };
+  function setObSetting(v) {
+    obSetting = v || null;
+    document.querySelectorAll("#ob-setting .chip").forEach(function (x) { x.setAttribute("aria-pressed", x.getAttribute("data-val") === obSetting ? "true" : "false"); });
+  }
+  function obStaffByName(name) {
+    var n = String(name || "").trim().replace(/\s+/g, " ").toLowerCase();
+    if (!n) return null;
+    return state.staffDirectory.filter(function (p) { return p.active && String(p.name || "").trim().replace(/\s+/g, " ").toLowerCase() === n; })[0] || null;
+  }
+  function obAutoSetting() {
+    var hint = document.getElementById("ob-setting-hint");
+    var p = obStaffByName(document.getElementById("ob-observed").value);
+    if (!p) { if (obSettingAuto) { setObSetting(null); obSettingAuto = false; } hint.textContent = "Fills in by itself from the therapist's Staff Directory setting."; return; }
+    obSettingAuto = !!(p.workSetting === "Daycare" || p.workSetting === "Out sessions");
+    if (p.workSetting === "Daycare") { setObSetting("daycare"); hint.textContent = p.name + " works in Daycare."; }
+    else if (p.workSetting === "Out sessions") { setObSetting("out"); hint.textContent = p.name + " works in Out sessions."; }
+    else if (p.workSetting === "Daycare & Out sessions") { setObSetting(null); hint.textContent = p.name + " works in both — tap which session you observed."; }
+    else { setObSetting(null); hint.textContent = "Not set for " + p.name + " in the Staff Directory — tap which session you observed."; }
+  }
+  document.querySelectorAll("#ob-setting .chip").forEach(function (c) {
+    c.addEventListener("click", function () { setObSetting(c.getAttribute("data-val")); obSettingAuto = false; });
+  });
+  ["input", "change"].forEach(function (ev) { document.getElementById("ob-observed").addEventListener(ev, obAutoSetting); });
   document.querySelectorAll("#ob-mode .chip").forEach(function (c) {
     c.addEventListener("click", function () {
       obMode = c.getAttribute("data-val");
@@ -3447,7 +3489,8 @@
     deputy: "Deputy Head",
     technical_director: "Technical Director",
     technical_coordinator: "Technical Coordinator",
-    day_care_coordinator: "Day Care Coordinator"
+    daycare_program_manager: "Daycare Program Manager",
+    day_care_coordinator: "Day Care Coordinator" // old chip, never used; replaced 2026-11-24
   };
 
   // Multi-select (added 2026-09-13, per Haidy): a person holding more than
@@ -3462,6 +3505,8 @@
   document.querySelectorAll("#ob-role .chip").forEach(function (c) {
     c.addEventListener("click", function () {
       c.setAttribute("aria-pressed", c.getAttribute("aria-pressed") === "true" ? "false" : "true");
+      // The Daycare Program Manager only observes daycare sessions.
+      if (c.getAttribute("data-val") === "daycare_program_manager" && c.getAttribute("aria-pressed") === "true" && !obSetting) setObSetting("daycare");
       renderObProgress();
     });
   });
@@ -3522,6 +3567,30 @@
   function obBlockLabel(b) {
     return b.role === "deputy" ? "Deputy" : "HOD";
   }
+  // Daycare rule (2026-11-24, Haidy, from 1 Dec 2026): each department's HOD
+  // observes every daycare therapist of that department once every 2 weeks.
+  // Shown under the HOD counter: last HOD daycare observation per daycare
+  // therapist (workSetting Daycare or Daycare & Out sessions) and days since.
+  function obDaycareFortnightHtml(dept) {
+    var people = state.staffDirectory.filter(function (p) {
+      if (!p.active || (p.workSetting !== "Daycare" && p.workSetting !== "Daycare & Out sessions")) return false;
+      var d = Array.isArray(p.department) ? p.department : [p.department];
+      var r = Array.isArray(p.roles) ? p.roles : [p.roles];
+      return d.indexOf(dept) !== -1 && (r.indexOf("Therapist") !== -1 || r.indexOf("Senior Therapist") !== -1);
+    }).map(function (p) { return p.name; }).sort(function (a, b) { return a.localeCompare(b); });
+    if (!people.length) return "";
+    var today = new Date(); today.setHours(0, 0, 0, 0);
+    var rows = people.map(function (name) {
+      var last = state.observations.filter(function (o) {
+        return o.dept === dept && o.setting === "daycare" && obHasRole(o, "hod") && obNorm(o.observed) === obNorm(name);
+      }).map(function (o) { return o.date; }).sort().pop();
+      if (!last) return '<li><span style="color:#b26a00;">' + obEsc(name) + " — no daycare observation yet</span></li>";
+      var days = Math.round((today - new Date(last + "T00:00:00")) / 86400000);
+      var due = days >= 14;
+      return "<li" + (due ? ' style="color:#b26a00;"' : "") + ">" + obEsc(name) + " — last " + obEsc(isoToDMY(last)) + " (" + days + (days === 1 ? " day" : " days") + " ago)" + (due ? " · due now" : "") + "</li>";
+    }).join("");
+    return '<div class="obp-sub" style="margin-top:8px; font-weight:600;">🏫 Daycare therapists — once every 2 weeks</div><ul style="margin:4px 0 0; padding-left:18px;">' + rows + "</ul>";
+  }
   function renderObProgress() {
     var box = document.getElementById("ob-progress");
     if (!box) return;
@@ -3562,6 +3631,7 @@
           ? '<div class="obp-missing">Not observed yet this month: ' + missing.map(obEsc).join(", ") + "</div>"
           : '<div class="obp-sub" style="margin-top:6px;">Every therapist in the department observed this month</div>';
       }
+      if (role === "hod") html += obDaycareFortnightHtml(dept);
       html += "</div>";
     });
     box.innerHTML = html;
@@ -3592,6 +3662,7 @@
     if (!dept) { err.textContent = "Choose a department."; err.style.display = "block"; return; }
     if (!obRoles.length) { err.textContent = "Tap at least one role for who observed."; err.style.display = "block"; return; }
     if (!observed) { err.textContent = "Enter the therapist's name."; err.style.display = "block"; return; }
+    if (!obSetting) { err.textContent = "Tap Daycare or Out session."; err.style.display = "block"; return; }
     if (!obChild) { err.textContent = "Enter the child's name (pick from the list)."; err.style.display = "block"; return; }
     if (!obMode) { err.textContent = "Choose Live or On Camera."; err.style.display = "block"; return; }
     if (!rubricComplete()) { err.textContent = "Rate all 5 rubric criteria before saving."; err.style.display = "block"; return; }
@@ -3600,14 +3671,14 @@
       id: "o" + Date.now(),
       date: obsDate, time: obsTime,
       dept: dept, observerRole: obRoles.join(","), observed: observed,
-      child: obChild, observationMode: obMode,
+      child: obChild, observationMode: obMode, setting: obSetting,
       rubric: JSON.parse(JSON.stringify(obRubric)), behavior: JSON.parse(JSON.stringify(obBehavior)),
       training: obTraining || "", note: note,
       loggedAt: new Date().toISOString()
     };
     var fields = compact({
       id: entry.id, date: entry.date, time: entry.time, dept: entry.dept, observerRole: entry.observerRole,
-      observed: entry.observed, child: entry.child, observationMode: entry.observationMode, rubricJson: JSON.stringify(entry.rubric), behaviorJson: JSON.stringify(entry.behavior),
+      observed: entry.observed, child: entry.child, observationMode: entry.observationMode, setting: entry.setting, rubricJson: JSON.stringify(entry.rubric), behaviorJson: JSON.stringify(entry.behavior),
       training: entry.training, note: entry.note, loggedAt: entry.loggedAt
     });
     // Duplicate rule (2026-10-28, Haidy): the same therapist, on the same date
@@ -3639,6 +3710,8 @@
       entry._rid = rec.id;
       state.observations.unshift(entry);
       document.getElementById("ob-observed").value = "";
+      setObSetting(null);
+      document.getElementById("ob-setting-hint").textContent = "Fills in by itself from the therapist's Staff Directory setting.";
       document.getElementById("ob-child").value = "";
       obMode = null;
       document.querySelectorAll("#ob-mode .chip").forEach(function (x) { x.setAttribute("aria-pressed", "false"); });
@@ -4514,7 +4587,7 @@
   // the older single-choice "role" field is kept only for history and is no
   // longer written to.
   function needsDeptRoles(roles) {
-    var ORG_WIDE = ["Technical Director", "Technical Coordinator", "Operations Director", "Senior Admin", "Admin", "HR Specialist", "Accountant"];
+    var ORG_WIDE = ["Technical Director", "Technical Coordinator", "Operations Director", "Senior Admin", "Admin", "HR Specialist", "Accountant", "Daycare Program Manager"];
     return (roles || []).some(function (r) { return r && ORG_WIDE.indexOf(r) === -1; });
   }
   document.querySelectorAll("#sd-role-chips .chip").forEach(function (c) {
@@ -4604,7 +4677,8 @@
   // on her row would have silently dropped it), Senior Admin, Admin, HR
   // Specialist. These are org-wide (no department) and have no KPI sheet /
   // Session Log role.
-  var STAFF_TITLES = ["Technical Director", "Technical Coordinator", "Operations Director", "Consultant", "HOD", "Deputy", "Therapist", "Senior Therapist", "Trainee", "Senior Admin", "Admin", "HR Specialist", "Accountant"];
+  var STAFF_TITLES = ["Technical Director", "Technical Coordinator", "Operations Director", "Consultant", "HOD", "Deputy", "Therapist", "Senior Therapist", "Trainee", "Senior Admin", "Admin", "HR Specialist", "Accountant", "Daycare Program Manager"];
+  // Daycare Program Manager added 2026-11-24 (per Haidy, for Sara) — org-wide (covers every discipline in the daycare), no department.
   // Accountant added 2026-11-23 (per Haidy) — org-wide, no KPI / Session Log role.
 
   function renderStaffDirectory() {
@@ -4666,8 +4740,20 @@
           '<option value="Fixed salary"' + (p.payType === "Fixed salary" ? " selected" : "") + '>Fixed salary — hidden from Session Log</option>' +
           '</select>'
         : "";
+      // Work setting (added 2026-11-24, per Haidy): Therapist / Senior Therapist
+      // only. Feeds the Daycare / Out session auto-fill on observations and the
+      // daycare KPI split planned from Dec 2026. Amber when not set yet.
+      var isTherapistRow = roles.indexOf("Therapist") !== -1 || roles.indexOf("Senior Therapist") !== -1;
+      var wsHtml = isTherapistRow
+        ? '<p class="hint" style="margin:6px 0 0;">Works in:</p>' +
+          '<select class="sd-ws-select" data-sd-wsfor="' + p.id + '" style="margin-top:2px;' + (p.workSetting || !p.active ? "" : " border-color:#e8a33d;") + '">' +
+          '<option value="" disabled' + (p.workSetting ? "" : " selected") + '>Not set yet</option>' +
+          WORK_SETTINGS.map(function (w) { return '<option value="' + w + '"' + (p.workSetting === w ? " selected" : "") + '>' + WORK_SETTING_ICON[w] + " " + w + '</option>'; }).join("") +
+          '</select>'
+        : "";
+      var wsBadge = isTherapistRow && p.workSetting ? ' <span title="' + escapeHtml(p.workSetting) + '">' + WORK_SETTING_ICON[p.workSetting] + '</span>' : "";
       html += '<div class="esc-item">' +
-        '<div class="esc-info"><div class="esc-dept">' + escapeHtml(p.name) + (p.active ? "" : " (inactive)") + '</div>' +
+        '<div class="esc-info"><div class="esc-dept">' + escapeHtml(p.name) + wsBadge + (p.active ? "" : " (inactive)") + '</div>' +
         // Editable email (added 2026-11-23, per Haidy — HR needs to fix
         // emails, e.g. personal Gmail -> @zoudeg.com). Saved on blur.
         '<p class="hint" style="margin:6px 0 0;">Email:</p>' +
@@ -4680,7 +4766,7 @@
         bdayHtml +
         '<p class="hint" style="margin:6px 0 0;">Title(s) — tap to add or remove:</p>' +
         roleChipsHtml +
-        deptSelectHtml + payHtml + '</div>' +
+        deptSelectHtml + wsHtml + payHtml + '</div>' +
         '<div class="esc-actions">' +
         (p.active
           ? '<button class="btn small secondary" data-sd-deactivate="' + p.id + '">Deactivate</button>'
@@ -4778,6 +4864,9 @@
         if (v === item.birthday) { input.value = v; return; }
         updateStaffDirectory(id, { birthday: v });
       });
+    });
+    wrap.querySelectorAll("[data-sd-wsfor]").forEach(function (sel) {
+      sel.addEventListener("change", function () { updateStaffDirectory(sel.getAttribute("data-sd-wsfor"), { workSetting: sel.value }); });
     });
     wrap.querySelectorAll("[data-sd-payfor]").forEach(function (sel) {
       sel.addEventListener("change", function () { updateStaffDirectory(sel.getAttribute("data-sd-payfor"), { payType: sel.value }); });
@@ -5322,7 +5411,7 @@
     } else if (kind === "observation") {
       var roles = (x.observerRole || "").split(",").filter(Boolean).map(function (r) { return OB_ROLE_LABELS[r] || r; }).join(" + ");
       h += dRow("Date & time", dWhen(x.date, x.time)) + dRow("Department", x.dept) + dRow("Observed", x.observed) + dRow("Child", x.child) +
-        dRow("Mode", OB_MODE_LABELS[x.observationMode] || x.observationMode) + dRow("Observer", roles);
+        dRow("Setting", OB_SETTING_LABELS[x.setting] || x.setting) + dRow("Mode", OB_MODE_LABELS[x.observationMode] || x.observationMode) + dRow("Observer", roles);
       h += '<div class="detail-sub">Rubric</div>';
       RUBRIC_CRITERIA.forEach(function (c) {
         var v = (x.rubric || {})[c.key];
@@ -5447,7 +5536,7 @@
       var obWhen = o.date ? isoToDMY(o.date) + (o.time ? " " + fmtTime12(o.time) : "") + " — " : "";
       items.push({
         kind: "observation", id: o.id,
-        text: obWhen + o.dept + " — " + escapeHtml(o.observed) + (o.child ? " / " + escapeHtml(o.child) : "") + (o.observationMode ? " [" + (OB_MODE_LABELS[o.observationMode] || o.observationMode) + "]" : "") + " (" + rubricSummary(o.rubric) + ")" + (behaviorNote ? " — " + behaviorNote : "") + (roleLabel ? " — by " + roleLabel : ""),
+        text: obWhen + o.dept + " — " + escapeHtml(o.observed) + (o.child ? " / " + escapeHtml(o.child) : "") + (o.setting ? " [" + (OB_SETTING_LABELS[o.setting] || o.setting) + "]" : "") + (o.observationMode ? " [" + (OB_MODE_LABELS[o.observationMode] || o.observationMode) + "]" : "") + " (" + rubricSummary(o.rubric) + ")" + (behaviorNote ? " — " + behaviorNote : "") + (roleLabel ? " — by " + roleLabel : ""),
         at: o.loggedAt
       });
     });
