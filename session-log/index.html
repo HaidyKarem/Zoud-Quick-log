@@ -375,7 +375,9 @@
   function launchMonth() { return settingVal("sessionLogLaunchMonth", ""); }
   function editWindow() { var n = parseInt(settingVal("sessionLogEditWindowDays", "3"), 10); return n >= 0 ? n : 3; }
   function staffObj(name) { name = name || cur.staff; return STAFF.filter(function (s) { return s.name === name; })[0] || null; }
-  function isSenior(st) { return !!st && st.roles.some(function (r) { return SENIOR.indexOf(r) >= 0; }); }
+  // 2026-11-24: Staff Directory "sessionLogCanScreen" ticked = Therapist / Senior Therapist
+  // who may also log Screening and I.S (first: Ghada Mohamed, Academic/Arabic).
+  function isSenior(st) { return !!st && (st.canScreen || st.roles.some(function (r) { return SENIOR.indexOf(r) >= 0; })); }
   function typesFor(st) { return isSenior(st) ? ["session", "cover", "screening", "initial"] : ["session", "cover"]; }
   function dayKey() { return cur.staff + "|" + cur.date; }
   function dayEntries(key) { var r = dayRecs[key || dayKey()]; return r ? r.entries : {}; }
@@ -412,7 +414,7 @@
   }
   function boot() {
     var staffP = atList(TABLES.staffDirectory).then(function (recs) {
-      STAFF_ALL = recs.map(function (r) { var f = r.fields || {}; return { rid: r.id, name: f.name || "", roles: f.roles || [], dept: f.department || "", active: f.active === true, hash: f.sessionLogCodeHash || "", fixedSalary: f.payType === "Fixed salary", mixedPay: f.payType === "Fixed + per session" }; })
+      STAFF_ALL = recs.map(function (r) { var f = r.fields || {}; return { rid: r.id, name: f.name || "", roles: f.roles || [], dept: f.department || "", active: f.active === true, hash: f.sessionLogCodeHash || "", fixedSalary: f.payType === "Fixed salary", mixedPay: f.payType === "Fixed + per session", canScreen: f.sessionLogCanScreen === true }; })
         .filter(function (p) { return p.active && p.name && p.roles.some(function (r) { return LOGGING_ROLES.indexOf(r) >= 0; }); })
         .sort(function (a, b) { return a.name.localeCompare(b.name); });
       // 2026-10-28: Staff Directory "payType" = "Fixed salary" means not paid per
