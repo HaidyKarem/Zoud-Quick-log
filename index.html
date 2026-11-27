@@ -1152,9 +1152,10 @@
 
       <label for="sd-emp">Employment</label>
       <select id="sd-emp">
-        <option value="" disabled selected>Full time or Part time?</option>
+        <option value="" disabled selected>Full time, Part time or Rate per session?</option>
         <option value="Full time">Full time</option>
         <option value="Part time">Part time</option>
+        <option value="Rate per session">Rate per session</option>
       </select>
 
       <label for="sd-birthday">Birthday <span style="font-weight:400; opacity:.7;">(day/month — optional)</span></label>
@@ -1508,6 +1509,7 @@
       <label for="leave-days">Number of Days</label>
       <input type="number" id="leave-days" min="0.5" step="0.5" placeholder="Auto-filled from the dates above">
       <p class="hint" style="margin-top:0;">Auto-filled by counting every calendar day between the dates (inclusive) — adjust it by hand if weekends/off-days shouldn't count.</p>
+      <p class="hint" id="leave-over-warning" style="display:none; margin-top:0; color:#b4541a; font-weight:600;"></p>
 
       <label for="leave-note">Note (optional)</label>
       <textarea dir="auto" id="leave-note" placeholder="Any extra context"></textarea>
@@ -4244,6 +4246,20 @@
   // full quota becomes available on hire date + 3 months. Later years are
   // granted on each hire anniversary as before. Empty employmentType is
   // treated as Full time.
+  // CALENDAR-YEAR POLICY (2026-11-27, management's answer relayed by Haidy):
+  // from 1 January 2027 every leave year is the calendar year (Jan–Dec).
+  // Unused days end on 31 December: no carry-over, no payout. Full time
+  // 15+6, Part time 8+3, Rate per session = no balance at all
+  // (they can still submit a request for approval). Taking more than the
+  // balance is allowed but the extra days are deducted from salary, so the
+  // form/approval rows show a clear warning and the request stores a
+  // balanceNote that the Stage-1 email includes. The 3-month wait stays: once
+  // a person passes hire + 3 months they get that calendar year's FULL quota
+  // (Haidy chose full, not prorated). Until 31/12/2026 the old
+  // anniversary + March carry-over model below stays exactly as it was
+  // (Haidy: "القديم لحد 31/12"); a Rate-per-session person is counted as
+  // Part time until then. Requests are counted in the year of their start date.
+  var LEAVE_CAL_POLICY_FROM = new Date(2027, 0, 1);
   function leaveEligibleFrom(hireDateIso) {
     var hire = new Date(hireDateIso + "T00:00:00");
     if (isNaN(hire.getTime())) return null;
@@ -4252,7 +4268,16 @@
     if (d.getDate() !== hire.getDate()) d = new Date(hire.getFullYear(), hire.getMonth() + 4, 0);
     return d;
   }
-  function isPartTime(person) { return !!person && person.employmentType === "Part time"; }
+  // Fixed + per session (payType) always counts as Full time (Haidy 2026-11-27:
+  // "كلهم Full time = 21"), whatever employmentType says.
+  function isMixedPay(person) { return !!person && person.payType === "Fixed + per session"; }
+  function isFreelance(person) { return !!person && !isMixedPay(person) && person.employmentType === "Rate per session"; }
+  function isPartTime(person) { return !!person && !isMixedPay(person) && (person.employmentType === "Part time" || isFreelance(person)); }
+  function empLabel(person, refDate) {
+    if (isFreelance(person)) return refDate >= LEAVE_CAL_POLICY_FROM ? "Rate per session" : "Rate per session (Part time days until 31/12/2026)";
+    if (isMixedPay(person)) return "Full time (Fixed + per session)";
+    return isPartTime(person) ? "Part time" : "Full time";
+  }
   function leaveCycles(hireDateIso, today) {
     var hire = new Date(hireDateIso + "T00:00:00");
     var cycles = [];
@@ -4274,32 +4299,70 @@
     if (isPartTime(person)) return leaveType === "casual" ? state.partCasualLeaveQuota : state.partAnnualLeaveQuota;
     return leaveType === "casual" ? state.casualLeaveQuota : state.annualLeaveQuota;
   }
-  function leaveBalance(staffName, leaveType) {
+  function leaveStartDate(l) { var d = new Date((l.startDate || "") + "T00:00:00"); return isNaN(d.getTime()) ? null : d; }
+  // refDate: the date the balance is evaluated at (default today). Pass a
+  // request's start date to get the balance of the year that request falls in.
+  // excludeId: leave this request out of the pending total.
+  function leaveBalance(staffName, leaveType, refDate, excludeId) {
     var person = state.staffDirectory.filter(function (p) { return p.name === staffName; })[0];
     if (!person || !person.hireDate) return null;
-    var quota = leaveQuotaFor(leaveType, person);
     var today = new Date();
-    var cycles = leaveCycles(person.hireDate, today);
-    var taken = state.leaveRequests
-      .filter(function (l) { return l.staffName === staffName && l.leaveType === leaveType && l.status === "approved"; })
-      .reduce(function (sum, l) { return sum + (l.daysCount || 0); }, 0);
-    // Draw down the oldest cycle's quota first; whatever's left in a
-    // cycle once its own forfeit date has passed is dropped from the
-    // valid total (both granted and remaining) rather than counted.
-    var remainingToAllocate = taken;
-    var granted = 0, remaining = 0;
-    cycles.forEach(function (cycle) {
-      var usedFromThisCycle = Math.min(quota, remainingToAllocate);
-      remainingToAllocate -= usedFromThisCycle;
-      var expired = today > cycle.forfeitDate;
-      if (!expired) {
-        granted += quota;
-        remaining += quota - usedFromThisCycle;
-      }
-    });
+    var ref = refDate || today;
     var eligibleFrom = leaveEligibleFrom(person.hireDate);
-    return { granted: granted, taken: taken, remaining: remaining, eligibleFrom: eligibleFrom && eligibleFrom > today ? eligibleFrom : null, partTime: isPartTime(person) };
+    var mine = state.leaveRequests.filter(function (l) { return l.staffName === staffName && l.leaveType === leaveType && l.id !== excludeId; });
+    var result;
+    if (ref >= LEAVE_CAL_POLICY_FROM) {
+      var year = ref.getFullYear();
+      var inYear = function (l) { var d = leaveStartDate(l); return d && d.getFullYear() === year; };
+      var taken = mine.filter(function (l) { return l.status === "approved" && inYear(l); }).reduce(function (s, l) { return s + (l.daysCount || 0); }, 0);
+      var pending = mine.filter(function (l) { return l.status === "pending" && inYear(l); }).reduce(function (s, l) { return s + (l.daysCount || 0); }, 0);
+      var freelance = isFreelance(person);
+      var granted = (!freelance && eligibleFrom && eligibleFrom <= ref) ? leaveQuotaFor(leaveType, person) : 0;
+      result = { granted: granted, taken: taken, pending: pending, remaining: granted - taken, freelance: freelance, year: year, calendar: true };
+    } else {
+      // Old model (until 31/12/2026). Requests starting in 2027+ belong to the new year.
+      var quota = leaveQuotaFor(leaveType, person);
+      var old = mine.filter(function (l) { var d = leaveStartDate(l); return !d || d < LEAVE_CAL_POLICY_FROM; });
+      var cycles = leaveCycles(person.hireDate, today);
+      var taken = old.filter(function (l) { return l.status === "approved"; }).reduce(function (s, l) { return s + (l.daysCount || 0); }, 0);
+      var pending = old.filter(function (l) { return l.status === "pending"; }).reduce(function (s, l) { return s + (l.daysCount || 0); }, 0);
+      // Draw down the oldest cycle's quota first; whatever's left in a
+      // cycle once its own forfeit date has passed is dropped from the
+      // valid total (both granted and remaining) rather than counted.
+      var remainingToAllocate = taken;
+      var granted = 0, remaining = 0;
+      cycles.forEach(function (cycle) {
+        var usedFromThisCycle = Math.min(quota, remainingToAllocate);
+        remainingToAllocate -= usedFromThisCycle;
+        var expired = today > cycle.forfeitDate;
+        if (!expired) {
+          granted += quota;
+          remaining += quota - usedFromThisCycle;
+        }
+      });
+      remaining -= remainingToAllocate; // days taken beyond everything granted show as negative
+      result = { granted: granted, taken: taken, pending: pending, remaining: remaining, freelance: false, calendar: false };
+    }
+    result.eligibleFrom = eligibleFrom && eligibleFrom > ref && !isFreelance(person) ? eligibleFrom : null;
+    result.partTime = isPartTime(person);
+    result.label = empLabel(person, ref);
+    return result;
   }
+  // Text stored on the request (balanceNote) and shown in the approval rows.
+  // Empty when the request fits the balance.
+  function leaveBalanceNote(l) {
+    var start = leaveStartDate(l);
+    var ref = start && start >= LEAVE_CAL_POLICY_FROM ? start : new Date();
+    var b = leaveBalance(l.staffName, l.leaveType, ref, l.id);
+    if (!b) return "";
+    if (b.freelance) return "Rate per session — no leave balance applies";
+    var available = b.remaining - b.pending;
+    var over = (l.daysCount || 0) - Math.max(available, 0);
+    if (over <= 0) return "";
+    var type = LEAVE_TYPE_LABEL[l.leaveType] || l.leaveType;
+    return "Exceeds " + type + " balance by " + over + " day(s) — extra days are deducted from salary (available before this request: " + Math.max(available, 0) + (b.calendar ? ", " + b.year : "") + ")";
+  }
+  function fmtBal(b) { return b.freelance ? "no balance" : b.remaining + "/" + b.granted; }
 
   function refreshLeaveStaffOptions() {
     var sel = document.getElementById("leave-staff");
@@ -4321,8 +4384,17 @@
     var a = leaveBalance(name, "annual");
     var c = leaveBalance(name, "casual");
     if (!a || !c) { hint.textContent = "No hire date on file for " + name + " yet — add it in Staff Directory."; return; }
-    hint.textContent = (a.partTime ? "Part time · " : "Full time · ") + "Annual: " + a.remaining + "/" + a.granted + " remaining · Casual: " + c.remaining + "/" + c.granted + " remaining" +
-      (a.eligibleFrom ? " — no leave balance yet: eligible from " + formatDateDMY(a.eligibleFrom) + " (3 months after hire date)" : "");
+    var txt = a.label + " · " + (a.freelance
+      ? "no leave balance (rate per session) — the request still goes for approval"
+      : "Annual: " + a.remaining + "/" + a.granted + " remaining · Casual: " + c.remaining + "/" + c.granted + " remaining" + (a.calendar ? " (" + a.year + ", ends 31/12, no carry-over)" : ""));
+    if (a.eligibleFrom) txt += " — no leave balance yet: eligible from " + formatDateDMY(a.eligibleFrom) + " (3 months after hire date)";
+    // Over-balance warning for the request being filled in (Haidy 2026-11-27: allowed, but deducted)
+    var warnEl = document.getElementById("leave-over-warning");
+    var s0 = parseDMY(document.getElementById("leave-start").value);
+    var d0 = parseFloat(document.getElementById("leave-days").value);
+    var note = (leaveType && s0 && d0 > 0) ? leaveBalanceNote({ id: "__draft", staffName: name, leaveType: leaveType, startDate: s0, daysCount: d0 }) : "";
+    if (warnEl) { warnEl.textContent = note && note.indexOf("Exceeds") === 0 ? "⚠️ " + note + ". You can still submit." : ""; warnEl.style.display = warnEl.textContent ? "block" : "none"; }
+    hint.textContent = txt;
   }
 
   var leaveType = null;
@@ -4335,7 +4407,10 @@
     if (!s || !e) return;
     var days = Math.round((new Date(e) - new Date(s)) / 86400000) + 1;
     if (days > 0) document.getElementById("leave-days").value = days;
+    updateLeaveBalanceHint();
   }
+  // recomputeLeaveDays also refreshes the balance hint / over-balance warning (2026-11-27)
+  document.getElementById("leave-days").addEventListener("input", updateLeaveBalanceHint);
   document.getElementById("leave-start").addEventListener("change", recomputeLeaveDays);
   document.getElementById("leave-end").addEventListener("change", recomputeLeaveDays);
   document.getElementById("leave-start-native").addEventListener("change", recomputeLeaveDays);
@@ -4372,11 +4447,12 @@
       status: "pending", loggedAt: new Date().toISOString(),
       coverageConfirmed: true
     };
+    entry.balanceNote = leaveBalanceNote(entry);
     var fields = compact({
       id: entry.id, staffName: entry.staffName, staffEmail: entry.staffEmail, leaveType: entry.leaveType,
       startDate: entry.startDate, endDate: entry.endDate, daysCount: entry.daysCount, note: entry.note,
       requestedByName: entry.requestedByName, status: entry.status, loggedAt: entry.loggedAt,
-      coverageConfirmed: entry.coverageConfirmed
+      coverageConfirmed: entry.coverageConfirmed, balanceNote: entry.balanceNote
     });
     atCreate(TABLES.leaveRequests, fields).then(function (rec) {
       entry._rid = rec.id;
@@ -4386,6 +4462,7 @@
       document.querySelectorAll("#leave-type .chip").forEach(function (x) { x.setAttribute("aria-pressed", "false"); });
       document.getElementById("leave-staff").value = "";
       coverageConfirmedInput.checked = false;
+      updateLeaveBalanceHint();
       render();
       leaveConfirm.show();
     }).catch(handleSaveFailure);
@@ -4406,6 +4483,7 @@
       '<div class="esc-info"><div class="esc-dept">' + escapeHtml(l.staffName) + ' — ' + (LEAVE_TYPE_LABEL[l.leaveType] || l.leaveType) + '</div>' +
       '<div class="esc-meta">' + isoToDMY(l.startDate) + ' → ' + isoToDMY(l.endDate) + ' · ' + l.daysCount + ' day(s) · requested by ' + escapeHtml(l.requestedByName) + '</div>' +
       (l.note ? '<div class="esc-meta">' + escapeHtml(l.note) + '</div>' : '') +
+      (function () { var bn = leaveBalanceNote(l); return bn ? '<div class="esc-meta" style="color:#b4541a; font-weight:600;">⚠️ ' + escapeHtml(bn) + '</div>' : ''; })() +
       (l.firstApprovedAt ? '<div class="esc-meta">Stage 1 approved by ' + escapeHtml(l.firstApprovedByName || "") + ' · awaiting Operations Director</div>' : '') +
       '</div>' +
       '<div class="esc-actions">' +
@@ -4442,7 +4520,9 @@
     wrap2.innerHTML = stage2Pending.map(function (l) { return leaveRowHtml(l, "leave-approve-final", "Final Approve"); }).join("");
 
     bindLeaveRow(wrap, "leave-approve-stage1", function (id) {
-      updateLeaveRequest(id, { firstApprovedByName: whoInput.value.trim(), firstApprovedAt: new Date().toISOString() });
+      var req = state.leaveRequests.filter(function (l) { return l.id === id; })[0];
+      // balanceNote refreshed here so the Stage-1 email to Nour shows the current over-balance / Rate per session status
+      updateLeaveRequest(id, { firstApprovedByName: whoInput.value.trim(), firstApprovedAt: new Date().toISOString(), balanceNote: req ? leaveBalanceNote(req) : "" });
     });
     bindLeaveRow(wrap2, "leave-approve-final", function (id) {
       updateLeaveRequest(id, { status: "approved", approvedByName: whoInput.value.trim(), approvedAt: new Date().toISOString() });
@@ -4461,7 +4541,7 @@
       var c = leaveBalance(p.name, "casual");
       html += '<div class="esc-item">' +
         '<div class="esc-info"><div class="esc-dept">' + escapeHtml(p.name) + '</div>' +
-        '<div class="esc-meta">' + (a ? (a.partTime ? "Part time · " : "Full time · ") : "") + 'Annual: ' + (a ? a.remaining + "/" + a.granted : "—") + ' · Casual: ' + (c ? c.remaining + "/" + c.granted : "—") +
+        '<div class="esc-meta">' + (a ? escapeHtml(a.label) + " · " : "") + (a && a.freelance ? "no leave balance" : 'Annual: ' + (a ? fmtBal(a) : "—") + ' · Casual: ' + (c ? fmtBal(c) : "—") + (a && a.calendar ? " (" + a.year + ")" : "")) +
         (a && a.eligibleFrom ? ' · eligible from ' + formatDateDMY(a.eligibleFrom) : '') + '</div></div>' +
         '</div>';
     });
@@ -4628,7 +4708,7 @@
     if (!hireDate) { err.textContent = "Enter a valid hire date (DD/MM/YYYY)."; err.style.display = "block"; return; }
     if (bdayRaw && !birthday) { err.textContent = "Birthday must be a real day and month, e.g. 14/03 (or leave it empty)."; err.style.display = "block"; return; }
     var empSelect = document.getElementById("sd-emp");
-    if (!empSelect.value) { err.textContent = "Choose Full time or Part time (it sets their leave days)."; err.style.display = "block"; return; }
+    if (!empSelect.value) { err.textContent = "Choose Full time, Part time or Rate per session (it sets their leave days)."; err.style.display = "block"; return; }
     if (!roles.length) { err.textContent = "Tap at least one title."; err.style.display = "block"; return; }
     if (needsDept && !dept) { err.textContent = "Choose their department."; err.style.display = "block"; return; }
     if (state.staffDirectory.some(function (p) { return p.name.toLowerCase() === name.toLowerCase(); })) {
@@ -4728,7 +4808,9 @@
         '<option value=""' + (p.employmentType ? "" : " selected") + ' disabled>Not set (counted as Full time)</option>' +
         '<option value="Full time"' + (p.employmentType === "Full time" ? " selected" : "") + '>Full time — ' + state.annualLeaveQuota + ' annual + ' + state.casualLeaveQuota + ' casual</option>' +
         '<option value="Part time"' + (p.employmentType === "Part time" ? " selected" : "") + '>Part time — ' + state.partAnnualLeaveQuota + ' annual + ' + state.partCasualLeaveQuota + ' casual</option>' +
+        '<option value="Rate per session"' + (p.employmentType === "Rate per session" ? " selected" : "") + '>Rate per session — no leave balance from 2027</option>' +
         '</select>';
+      if (isMixedPay(p)) empHtml += '<div class="hint" style="margin:2px 0 0;">Fixed + per session → always counted as Full time for leave</div>';
       // Pay type (added 2026-10-28, per Haidy): "Fixed salary" staff are not
       // paid per session, so the Session Log page hides them. Empty = per session.
       var SESSION_LOG_TITLES = ["HOD", "Deputy", "Consultant", "Therapist", "Senior Therapist"];
