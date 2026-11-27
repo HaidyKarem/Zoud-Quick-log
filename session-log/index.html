@@ -234,15 +234,15 @@
     <div class="stack" id="od-body" hidden>
       <div class="card">
         <div><label for="ad-month">Month</label><select id="ad-month"></select></div>
-        <p class="hint">What each specialist logged and submitted this month. Download it to compare with the Odoo count. If a number is wrong, tap Open days on that line and correct the day.</p>
+        <p class="hint">What each specialist logged this month. Download it to compare with the Odoo count. If a number is wrong, tap Open days on that line and correct the day.</p>
         <div class="totals" id="ad-totals"></div>
         <div class="tablewrap">
           <table>
-            <thead><tr><th>Specialist</th><th>Sessions</th><th>Screenings</th><th>I.S</th><th>Days submitted</th></tr></thead>
+            <thead><tr><th>Specialist</th><th>Sessions</th><th>Screenings</th><th>I.S</th><th>Days logged</th></tr></thead>
             <tbody id="ad-rows"></tbody>
           </table>
         </div>
-        <p class="hint">Sessions = regular plus cover sessions, including paid no-shows. Logged counts only days the specialist reviewed and submitted.</p>
+        <p class="hint">Sessions = regular plus cover sessions, including paid no-shows. Every saved day counts straight away (no submit step since 28/11/2026).</p>
         <div class="rowbtns">
           <button class="btn small" id="ad-csv">Download monthly report (Excel)</button>
           <button class="btn secondary small" id="ad-csv-detail">Download every session (Excel)</button>
@@ -382,7 +382,10 @@
   function dayKey() { return cur.staff + "|" + cur.date; }
   function dayEntries(key) { var r = dayRecs[key || dayKey()]; return r ? r.entries : {}; }
   function hasEntries(key) { return Object.keys(dayEntries(key)).length > 0; }
-  function isSubmitted(key) { var r = dayRecs[key]; return !!(r && r.submittedAt); }
+  // Submit step removed 2026-11-28 (Haidy): every saved day counts. Each
+  // specialist is responsible for their own sessions and Nour compares the
+  // monthly totals with Odoo. submittedAt is still written (first save) for history.
+  function isSubmitted(key) { var r = dayRecs[key]; return !!(r && Object.keys(r.entries || {}).length); }
 
   // ================= loading =================
   function mergeDayRecord(r) {
@@ -469,9 +472,8 @@
     var key = dayKey(), rec = dayRecs[key];
     if (!rec) rec = dayRecs[key] = { rid: null, staffName: cur.staff, date: cur.date, entries: {}, submittedAt: "", updatedAt: "", lastEditedBy: "" };
     rec.lastEditedBy = odEdit ? OD_NAME : cur.staff;
-    // The specialist's own edit sends the day back to "not submitted"; the Operations Director's correction counts straight away.
-    if (odEdit) rec.submittedAt = rec.submittedAt || new Date().toISOString();
-    else rec.submittedAt = submit ? new Date().toISOString() : "";
+    // Every save counts (submit step removed 2026-11-28).
+    rec.submittedAt = rec.submittedAt || new Date().toISOString();
     return saveDay(key);
   }
   $("save-retry").addEventListener("click", function () {
@@ -480,13 +482,12 @@
   });
 
   // ================= counting =================
-  // Only submitted days count. pending = days with entries that were never submitted.
+  // Every day with entries counts (2026-11-28). pending stays empty, kept for older callers.
   function countMonth(name, month) {
     var c = { session: 0, cover: 0, screening: 0, initial: 0, noshow: 0, pending: [] };
     Object.keys(dayRecs).forEach(function (k) {
       var r = dayRecs[k]; if (r.staffName !== name || r.date.slice(0, 7) !== month) return;
       if (!Object.keys(r.entries).length) return;
-      if (!r.submittedAt) { c.pending.push(r.date); return; }
       var d = countEntries(r.entries);
       ["session", "cover", "screening", "initial", "noshow"].forEach(function (t) { c[t] += d[t]; });
     });
@@ -634,7 +635,7 @@
       (st.dept ? '<span class="pill wait">' + esc(st.dept) + "</span>" : "") +
       '<span class="hint" style="align-self:center">Can log: ' + typesFor(st).map(function (t) { return TYPES[t]; }).join(", ") + "</span>";
     var c = countMonth(cur.staff, cur.date.slice(0, 7));
-    $("sl-summary").innerHTML = "<span>" + MON_LONG[d.getMonth()] + " submitted</span>" +
+    $("sl-summary").innerHTML = "<span>" + MON_LONG[d.getMonth()] + " logged</span>" +
       "<span><b>" + (c.session + c.cover) + "</b> session" + (c.session + c.cover === 1 ? "" : "s") + "</span>" + (c.cover ? "<span>incl. <b>" + c.cover + "</b> cover</span>" : "") +
       (senior ? "<span><b>" + c.screening + "</b> screening</span><span><b>" + c.initial + "</b> I.S</span>" : "") +
       (c.noshow ? "<span>incl. <b>" + c.noshow + "</b> no-show</span>" : "") +
@@ -765,30 +766,9 @@
     var dayName = DOW_LONG[d.getDay()] + " " + d.getDate() + " " + MON[d.getMonth()], key = dayKey();
     if (cur.loading || state === "friday" || !keys.length) { box.innerHTML = ""; return; }
     var line = countLine(countEntries(entries), senior);
-    if (isSubmitted(key)) {
-      box.innerHTML = '<p class="notice approved">Submitted ✓ ' + dayName + ": " + line + "." + (editable && !odEdit ? " Changing anything will ask you to review and submit again." : "") + "</p>";
-      return;
-    }
-    if (!editable) { box.innerHTML = '<p class="notice warn">This day was logged but never submitted, so it is not counted. Ask the Operations Director to correct it.</p>'; return; }
-    if (!cur.review) {
-      box.innerHTML = '<p class="notice warn">Not submitted yet. This day only counts after you review and approve it.</p><button class="btn wide" id="sl-review-open">Review and submit ' + dayName + "</button>";
-      $("sl-review-open").addEventListener("click", function () { cur.review = true; cur.editing = null; renderTherapist(); var rv = document.querySelector(".review"); if (rv) rv.scrollIntoView({ block: "nearest" }); });
-      return;
-    }
-    var h = '<div class="review"><h2>Review ' + dayName + "</h2><ul>" + keys.map(function (i) {
-      var e = entries[i];
-      return '<li><span class="time">' + slotLabel(+i, e) + '</span><span class="child">' + esc(e.child) + '</span><span class="pill t-' + esc(e.type) + '">' + (TYPES[e.type] || esc(e.type)) + "</span>" +
-        (e.type === "cover" && e.coverFor ? '<span class="hint">for ' + esc(e.coverFor) + "</span>" : "") + (e.status === "noshow" ? '<span class="pill noshow">No-show</span>' : "") + "</li>";
-    }).join("") + '</ul><p class="hint"><b>' + line + "</b></p>";
-    if (sugCount) h += '<p class="notice warn">' + sugCount + " from last week's schedule still unanswered above. They will not be counted unless you tap ✓ or No-show.</p>";
-    h += '<p class="hint">I confirm these are the sessions I delivered on this day.</p><div class="rowbtns"><button class="btn" id="sl-approve">Approve and submit</button><button class="btn secondary" id="sl-review-back">Back to edit</button></div></div>';
+    var h = '<p class="notice approved">Saved ✓ ' + dayName + ": " + line + ". Counted automatically.</p>";
+    if (sugCount && editable) h += '<p class="notice warn">' + sugCount + " from last week's schedule still unanswered above. They will not be counted unless you tap ✓ or No-show.</p>";
     box.innerHTML = h;
-    $("sl-review-back").addEventListener("click", function () { cur.review = false; renderTherapist(); });
-    $("sl-approve").addEventListener("click", function () {
-      cur.review = false;
-      touchDay(true).then(function () { if (!failedSaves[key]) toast("Submitted ✓ " + dayName); });
-      renderTherapist();
-    });
   }
   // Which month row has its brief open ("" = none). Kept across re-renders.
   var monthOpen = "";
@@ -811,7 +791,7 @@
           (e.type === "cover" && e.coverFor ? '<span class="hint">for ' + esc(e.coverFor) + "</span>" : "") + (e.status === "noshow" ? '<span class="pill noshow">No-show</span>' : "") + "</li>";
       }).join("") + "</ul>";
       h += '<p class="hint" style="margin:0;"><b>' + countLine(countEntries(entries), senior) + "</b></p>";
-      var st = rec && rec.submittedAt ? "Submitted " + fmtCairoStamp(rec.submittedAt) : "Not submitted yet, so not counted";
+      var st = rec && (rec.updatedAt || rec.submittedAt) ? "Last saved " + fmtCairoStamp(rec.updatedAt || rec.submittedAt) : "Saved";
       if (rec && rec.lastEditedBy && rec.lastEditedBy !== rec.staffName) st += " · last edited by " + esc(rec.lastEditedBy);
       h += '<p class="hint" style="margin:0;">' + st + "</p>";
     }
@@ -824,13 +804,13 @@
     for (var dt = last; dt.slice(0, 7) === month; dt = addDays(dt, -1)) {
       var x = fromIso(dt); if (x.getDay() === 5) continue;
       var k = cur.staff + "|" + dt, has = hasEntries(k);
-      var pill = !has ? '<span class="pill wait">Nothing logged</span>' : (isSubmitted(k) ? '<span class="pill ok">Submitted</span>' : '<span class="pill noshow">Not submitted</span>');
+      var pill = !has ? '<span class="pill wait">Nothing logged</span>' : '<span class="pill ok">Logged</span>';
       var open = monthOpen === dt;
       rows += '<div class="mitem"><button class="mrow" data-brief="' + dt + '" aria-expanded="' + open + '" aria-current="' + (dt === cur.date) + '"><span class="md">' + DOW[x.getDay()] + " " + x.getDate() + " " + MON[x.getMonth()] + '</span><span class="mc">' + (has ? countLine(countEntries(dayEntries(k)), senior) : "") + "</span>" + pill + "</button>" +
         '<div class="mbrief" data-brief-for="' + dt + '"' + (open ? "" : " hidden") + ">" + (open ? dayBriefHtml(k, dt, senior) : "") + "</div></div>";
     }
     $("sl-month-title").textContent = (odEdit ? cur.staff + " · " : "My ") + MON_LONG[d.getMonth()];
-    $("sl-month-total").textContent = "Submitted so far: " + countLine(c, senior) + ". Tap a day to see a summary.";
+    $("sl-month-total").textContent = "Logged so far: " + countLine(c, senior) + ". Tap a day to see a summary.";
     $("sl-month").innerHTML = cur.loading ? "" : rows;
     function bindGoto(scope) {
       scope.querySelectorAll("[data-goto]").forEach(function (b) { b.addEventListener("click", function () { goTo(b.getAttribute("data-goto")); $("sl-daylabel").scrollIntoView({ block: "center" }); }); });
@@ -902,7 +882,7 @@
   function odRows() {
     return STAFF.map(function (st) {
       var c = countMonth(st.name, adMonth), days = 0;
-      Object.keys(dayRecs).forEach(function (k) { var r = dayRecs[k]; if (r.staffName === st.name && r.date.slice(0, 7) === adMonth && r.submittedAt && Object.keys(r.entries).length) days++; });
+      Object.keys(dayRecs).forEach(function (k) { var r = dayRecs[k]; if (r.staffName === st.name && r.date.slice(0, 7) === adMonth && Object.keys(r.entries).length) days++; });
       return { st: st, senior: isSenior(st), c: c, L: { s: c.session + c.cover, sc: c.screening, is: c.initial }, days: days };
     });
   }
@@ -973,18 +953,18 @@
     document.body.appendChild(a); a.click(); setTimeout(function () { URL.revokeObjectURL(a.href); a.remove(); }, 500);
   }
   $("ad-csv").addEventListener("click", function () {
-    var out = [["Specialist", "Title", "Department", "Pay", "Total sessions", "of which cover", "of which no-show", "Screenings", "I.S", "Days submitted", "Days logged but not submitted"]];
-    odRows().forEach(function (r) { out.push([r.st.name, r.st.roles.join(", "), r.st.dept, r.st.mixedPay ? "Fixed + per session" : "Per session", r.L.s, r.c.cover, r.c.noshow, r.senior ? r.L.sc : "", r.senior ? r.L.is : "", r.days, r.c.pending.length]); });
+    var out = [["Specialist", "Title", "Department", "Pay", "Total sessions", "of which cover", "of which no-show", "Screenings", "I.S", "Days logged"]];
+    odRows().forEach(function (r) { out.push([r.st.name, r.st.roles.join(", "), r.st.dept, r.st.mixedPay ? "Fixed + per session" : "Per session", r.L.s, r.c.cover, r.c.noshow, r.senior ? r.L.sc : "", r.senior ? r.L.is : "", r.days]); });
     downloadCsv("Zoud-Session-Log-" + adMonth + ".csv", out);
   });
   $("ad-csv-detail").addEventListener("click", function () {
-    var out = [["Date", "Day", "Time", "Specialist", "Department", "Type", "Child", "Attendance", "Cover for", "Day submitted", "Last edited by"]];
+    var out = [["Date", "Day", "Time", "Specialist", "Department", "Type", "Child", "Attendance", "Cover for", "Last saved", "Last edited by"]];
     Object.keys(dayRecs).sort(function (a, b) { var x = dayRecs[a], y = dayRecs[b]; return (x.date + x.staffName).localeCompare(y.date + y.staffName); }).forEach(function (k) {
       var rec = dayRecs[k]; if (rec.date.slice(0, 7) !== adMonth) return;
       var st = staffObj(rec.staffName);
       Object.keys(rec.entries).sort(function (a, b) { return a - b; }).forEach(function (i) {
         var e = rec.entries[i];
-        out.push([rec.date, DOW[fromIso(rec.date).getDay()], slotLabel(+i, e), rec.staffName, st ? st.dept : "", TYPES[e.type] || e.type, e.child, e.status === "noshow" ? "No-show" : "Attended", e.coverFor || "", rec.submittedAt ? "Yes" : "No", rec.lastEditedBy || ""]);
+        out.push([rec.date, DOW[fromIso(rec.date).getDay()], slotLabel(+i, e), rec.staffName, st ? st.dept : "", TYPES[e.type] || e.type, e.child, e.status === "noshow" ? "No-show" : "Attended", e.coverFor || "", fmtCairoStamp(rec.updatedAt || rec.submittedAt), rec.lastEditedBy || ""]);
       });
     });
     downloadCsv("Zoud-Session-Log-" + adMonth + "-all-sessions.csv", out);
